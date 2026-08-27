@@ -4,15 +4,32 @@
 <meta charset="utf-8">
 <title>Glass-Box Fleet — verify in your browser</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 900px; color: #111; }
-  h1 { font-size: 1.4rem; }
-  .note { color: #444; font-size: 0.92rem; }
-  button { font-size: 1rem; padding: 0.5rem 1rem; margin-right: 0.6rem; }
-  table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
-  td, th { border: 1px solid #ccc; padding: 6px 10px; font-size: 0.9rem; text-align: left; }
-  .ok { background: #e8f5e9; }
-  .bad { background: #ffebee; font-weight: 600; }
-  code { background: #f4f4f4; padding: 1px 5px; }
+  :root { --bg:#0d1117; --panel:#161b22; --line:#26303d; --fg:#e6edf3; --dim:#9aa7b4; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 1.6rem 2rem 2.5rem;
+         max-width: 1100px; background: var(--bg); color: var(--fg); font-size: 17px; }
+  h1 { font-size: 1.55rem; margin: 0 0 .5rem; letter-spacing: -.01em; }
+  .note { color: var(--dim); font-size: 1rem; line-height: 1.5; max-width: 62rem; }
+  button { font-size: 1.05rem; padding: .55rem 1.3rem; margin-right: .6rem; font-weight: 600;
+           background: #1f6feb; color: #fff; border: 0; border-radius: .4rem; cursor: pointer; }
+  input[type=file] { color: var(--dim); font-size: .95rem; }
+  table { border-collapse: collapse; margin-top: 1rem; width: 100%;
+          background: var(--panel); border-radius: .5rem; overflow: hidden; }
+  td, th { border-bottom: 1px solid var(--line); padding: .55rem .8rem; font-size: 1rem; text-align: left; }
+  th { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
+       background: #11161d; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .ok { background: #0f2a17; }
+  .ok td:last-child { color: #56d364; font-weight: 600; }
+  .bad { background: #4a1010; }
+  .bad td:last-child { color: #ff7b72; font-weight: 700; }
+  code { background: #11161d; padding: .1rem .35rem; border-radius: .25rem;
+         font-family: ui-monospace, monospace; color: #a9c7ff; }
+  .refused { background: #8f0d0d; color: #fff; padding: .1rem .5rem; border-radius: .7rem;
+             font-size: .8rem; font-weight: 700; margin-right: .4rem; }
+  .summary { margin-top: 1rem; font-size: 1.15rem; font-weight: 600; }
+  .summary.allgood { color: #56d364; }
+  .summary.anybad { color: #ff7b72; }
 </style>
 </head>
 <body>
@@ -30,33 +47,154 @@ record's integrity and signature, never "authorized on some chain".</p>
 import init, { verify_record_offline } from "./wasm/elara_verify_wasm.js";
 const ready = init();
 
-function render(records) {
-  const rows = records.map((entry, i) => {
-    const rec = entry.record ?? entry;
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+/* ---------------------------------------------------------------------------
+   Verify the bytes we were HANDED, not a re-serialisation of them.
+
+   A signature covers exact bytes. Round-tripping a record through
+   JSON.parse → JSON.stringify silently rewrites some of them: JS renders the
+   number 21.0 as "21", so a record whose price is a whole-number float comes
+   back with different bytes and fails a signature check that the CLI passes.
+   (Observed 2026-08-27: 6 of 7 real records "FAILED" here while
+   `elara-verify` said VERIFIED for all 7 — the verifier was right about the
+   bytes it was given and the page was giving it the wrong ones.)
+
+   So: slice each record's original substring out of the source text and hand
+   that to the engine verbatim. Parsing is used for display only.
+--------------------------------------------------------------------------- */
+
+// Index just past the JSON value that starts at s[i].
+function endOfValue(s, i) {
+  const c = s[i];
+  if (c === "{" || c === "[") {
+    const open = c, close = c === "{" ? "}" : "]";
+    let depth = 0, inStr = false, esc = false;
+    for (let j = i; j < s.length; j++) {
+      const ch = s[j];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === "\\") esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === open) depth++;
+      else if (ch === close && --depth === 0) return j + 1;
+    }
+    throw new Error("unterminated " + open);
+  }
+  if (c === '"') {
+    let esc = false;
+    for (let j = i + 1; j < s.length; j++) {
+      const ch = s[j];
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') return j + 1;
+    }
+    throw new Error("unterminated string");
+  }
+  let j = i;
+  while (j < s.length && ",}] \n\r\t".indexOf(s[j]) === -1) j++;
+  return j;
+}
+
+// Raw substrings of the elements of the JSON array starting at s[i] === '['.
+function rawArrayElements(s, i) {
+  const out = [];
+  let j = i + 1;
+  for (;;) {
+    while (j < s.length && /[\s,]/.test(s[j])) j++;
+    if (j >= s.length || s[j] === "]") return out;
+    const end = endOfValue(s, j);
+    out.push(s.slice(j, end));
+    j = end;
+  }
+}
+
+// [key, rawValue] pairs of the JSON object whose text is `s` — top level only.
+function rawEntries(s) {
+  const out = [];
+  let j = s.indexOf("{") + 1;
+  for (;;) {
+    while (j < s.length && /[\s,]/.test(s[j])) j++;
+    if (j >= s.length || s[j] !== '"') return out;
+    const kEnd = endOfValue(s, j);
+    const key = JSON.parse(s.slice(j, kEnd));
+    j = s.indexOf(":", kEnd) + 1;
+    while (j < s.length && /\s/.test(s[j])) j++;
+    const vEnd = endOfValue(s, j);
+    out.push([key, s.slice(j, vEnd)]);
+    j = vEnd;
+  }
+}
+
+// The raw record text out of one bundle entry — entries are {"record": {...}}
+// envelopes in this service's bundle, or bare records elsewhere.
+function rawRecordOf(rawEntry) {
+  for (const [k, v] of rawEntries(rawEntry)) if (k === "record") return v;
+  return rawEntry;
+}
+
+// Every record in the source text, as raw substrings — bundle, bare array or
+// one-record-per-line JSONL.
+function rawRecords(text) {
+  const t = text.trim();
+  if (t[0] === "[") return rawArrayElements(t, 0).map(rawRecordOf);
+  if (t[0] === "{") {
+    for (const [k, v] of rawEntries(t)) {
+      if (k === "records" && v.trim()[0] === "[") {
+        return rawArrayElements(v.trim(), 0).map(rawRecordOf);
+      }
+    }
+    const lines = t.split("\n").map(l => l.trim()).filter(Boolean);
+    if (lines.length > 1) return lines.map(rawRecordOf);
+    return [rawRecordOf(t)];
+  }
+  throw new Error("not JSON");
+}
+
+function render(rawList) {
+  let good = 0, bad = 0;
+  const rows = rawList.map((raw, i) => {
     let verdictText = "";
     let cls = "bad";
     try {
-      const v = verify_record_offline(JSON.stringify(rec));
+      const v = verify_record_offline(raw);
       const verified = typeof v.verdict === "string" && v.verdict.toUpperCase().includes("VERIF");
       verdictText = `${v.glyph ?? ""} ${v.verdict ?? ""} — ${(v.headline ?? "").slice(0, 80)}`;
       cls = verified ? "ok" : "bad";
     } catch (e) {
       verdictText = "verify error: " + e;
     }
+    cls === "ok" ? good++ : bad++;
+    // Display only — a tampered record may not even parse, and that is a
+    // failed row, not a broken page.
+    let rec = {};
+    try { rec = JSON.parse(raw); } catch (e) { /* keep the empty shell */ }
     const meta = rec.metadata ?? {};
-    return `<tr class="${cls}"><td>${i}</td><td><code>${(rec.id ?? "?").slice(0, 13)}…</code></td>` +
-           `<td>${meta.action ?? meta.agent ?? ""}</td><td>${verdictText}</td></tr>`;
+    const action = meta.gbx_action ?? meta.action ?? "";
+    const agent = meta.gbx_agent ?? meta.agent ?? "";
+    const mark = String(action).endsWith(".REFUSED") ? '<span class="refused">🛡 REFUSED</span>' : "";
+    return `<tr class="${cls}"><td>${i}</td><td><code>${esc((rec.id ?? "?").slice(0, 13))}…</code></td>` +
+           `<td>${esc(agent)}</td><td>${mark}${esc(action)}</td><td>${esc(verdictText)}</td></tr>`;
   }).join("");
+  const cls = bad ? "anybad" : "allgood";
+  const verdict = bad
+    ? `${bad} of ${good + bad} record(s) FAILED verification`
+    : `all ${good} records VERIFIED — offline, in this tab`;
   document.getElementById("out").innerHTML =
-    `<table><tr><th>#</th><th>record</th><th>action</th><th>verdict</th></tr>${rows}</table>` +
+    `<table><tr><th>#</th><th>record</th><th>agent</th><th>action</th><th>verdict</th></tr>${rows}</table>` +
+    `<p class="summary ${cls}">${verdict}</p>` +
     `<p class="note">Try it: save the file, flip one character in any record, load it again — ` +
     `the tampered row goes red. Same check, your machine, no trust required.</p>`;
 }
 
 async function verifyText(text) {
   await ready;
-  const data = JSON.parse(text);
-  render(data.records ?? data);
+  render(rawRecords(text));
 }
 
 document.getElementById("load").onclick = async () => {
