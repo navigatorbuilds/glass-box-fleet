@@ -44,14 +44,75 @@ research_worker = Agent(
     tools=[research_vendor],
 )
 
+BUDGET_LIMIT_USD = 500.0
+
+
+def check_budget_mandate(amount_usd: float) -> dict:
+    """Check a spend amount against the demo mandate budget. The check itself is sealed."""
+    approved = amount_usd <= BUDGET_LIMIT_USD
+    sealed = emit_record(
+        "intent-worker",
+        "check_budget_mandate",
+        {"amount_usd": amount_usd, "limit_usd": BUDGET_LIMIT_USD, "approved": approved},
+    )
+    return {"approved": approved, "limit_usd": BUDGET_LIMIT_USD,
+            "evidence_record": sealed.get("record", {}).get("id", "STUB")}
+
+
+def issue_purchase_intent(vendor_name: str, monthly_amount_usd: float) -> dict:
+    """Issue a purchase INTENT (no real money moves — evidence demo). Sealed; refused over budget."""
+    if monthly_amount_usd > BUDGET_LIMIT_USD:
+        sealed = emit_record(
+            "intent-worker",
+            "purchase_intent_REFUSED",
+            {"vendor": vendor_name, "amount_usd": monthly_amount_usd,
+             "reason": f"exceeds mandate budget {BUDGET_LIMIT_USD}"},
+        )
+        return {"status": "REFUSED", "reason": "over mandate budget",
+                "evidence_record": sealed.get("record", {}).get("id", "STUB")}
+    sealed = emit_record(
+        "intent-worker",
+        "issue_purchase_intent",
+        {"vendor": vendor_name, "amount_usd": monthly_amount_usd},
+    )
+    return {"status": "issued", "intent_id": sealed.get("record", {}).get("id", "STUB"),
+            "evidence_record": sealed.get("record", {}).get("id", "STUB")}
+
+
+def file_expense_record(intent_id: str, vendor_name: str, amount_usd: float) -> dict:
+    """File the expense entry for an issued intent. Sealed."""
+    sealed = emit_record(
+        "intent-worker",
+        "file_expense_record",
+        {"intent_id": intent_id, "vendor": vendor_name, "amount_usd": amount_usd},
+    )
+    return {"status": "filed", "evidence_record": sealed.get("record", {}).get("id", "STUB")}
+
+
+intent_worker = Agent(
+    name="intent_worker",
+    model="gemini-3.5-flash",
+    description="Issues purchase intents under a budget mandate; every step sealed as evidence.",
+    instruction=(
+        "You handle purchase intents in a procurement evidence demo. For a chosen vendor: first "
+        "check_budget_mandate for the monthly amount, then issue_purchase_intent, then "
+        "file_expense_record with the returned intent_id. If the mandate check fails or an "
+        "intent is REFUSED, report that plainly — the refusal is itself evidence. Never retry "
+        "a refused amount."
+    ),
+    tools=[check_budget_mandate, issue_purchase_intent, file_expense_record],
+)
+
 root_agent = Agent(
     name="procurement_orchestrator",
     model="gemini-3.5-flash",
-    description="Orchestrates the procurement fleet; delegates research to workers.",
+    description="Orchestrates the procurement fleet; delegates research and purchasing to workers.",
     instruction=(
-        "You run a procurement evidence demo. When asked to compare storage vendors, delegate "
-        "research on acme-cloud, initech-io and globex-data to the research worker, then "
-        "summarize the offers in a table and recommend one on price+SLA. Keep it brief."
+        "You run a procurement evidence demo. When asked to procure storage: (1) delegate "
+        "research on acme-cloud, initech-io and globex-data to the research worker; (2) pick "
+        "the best offer on price+SLA and say why in one line; (3) delegate to the intent worker "
+        "to budget-check, issue the purchase intent and file the expense for the chosen vendor "
+        "at its monthly price. Keep the final summary to a short table plus the record ids."
     ),
-    sub_agents=[research_worker],
+    sub_agents=[research_worker, intent_worker],
 )
