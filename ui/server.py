@@ -139,18 +139,28 @@ def read_rows() -> list[dict]:
 def rows_fragment() -> str:
     rows = read_rows()
     if not rows:
-        return '<tr><td colspan="6" class="empty">no records yet — POST /run (or the Run button) to grow the chain</td></tr>'
+        return '<tr><td colspan="7" class="empty">no records yet — POST /run (or the Run button) to grow the chain</td></tr>'
     out = []
     for r in rows:
         badge_class = {"OK": "ok", "BROKEN": "broken", "STUB": "stub"}[r["badge"]]
+        # Mandate refusals get the red-shield mark on the action cell — the
+        # refusal is a first-class sealed record, verifiable like any other.
+        refused = r["action"].endswith(".REFUSED")
+        action_cell = (
+            f'<span class="badge refused">🛡 REFUSED</span> {html.escape(r["action"])}'
+            if refused
+            else html.escape(r["action"])
+        )
+        mode_mark = f' <em>({html.escape(r["mode"])})</em>' if r["mode"] else ""
         out.append(
             "<tr>"
             f'<td>{r["index"]}</td>'
             f'<td>{html.escape(r["agent"])}</td>'
-            f'<td>{html.escape(r["action"])}{" <em>(direct)</em>" if r["mode"] == "direct" else ""}</td>'
+            f"<td>{action_cell}{mode_mark}</td>"
             f'<td>{html.escape(r["ts"])}</td>'
             f'<td class="mono">{html.escape(r["record_id"])}</td>'
             f'<td><span class="badge {badge_class}">{r["badge"]}</span></td>'
+            f'<td><button class="copy" onclick="copyRecord({r["index"]})">copy JSON</button></td>'
             "</tr>"
         )
     return "".join(out)
@@ -168,6 +178,8 @@ PAGE = """<!doctype html>
   .ok {{ background: #d7f5dd; color: #135b22; }}
   .broken {{ background: #ffd6d6; color: #8f0d0d; }}
   .stub {{ background: #ff2d2d; color: #fff; }}
+  .refused {{ background: #8f0d0d; color: #fff; }}
+  .copy {{ font-size: .75rem; padding: .15rem .5rem; }}
   .empty {{ color: #777; font-style: italic; }}
   button {{ padding: .4rem 1rem; font-size: 1rem; cursor: pointer; }}
   #runinfo {{ margin-left: 1rem; color: #555; }}
@@ -181,7 +193,7 @@ the cryptographic verdict comes from the offline verifier
 this server. This is a signed evidence log, not a blockchain.</p>
 <p><button id="runbtn" onclick="kick()">Run fleet once</button><span id="runinfo"></span></p>
 <table>
-<thead><tr><th>#</th><th>agent</th><th>action</th><th>ts</th><th>record id</th><th>chain</th></tr></thead>
+<thead><tr><th>#</th><th>agent</th><th>action</th><th>ts</th><th>record id</th><th>chain</th><th></th></tr></thead>
 <tbody id="rows">{rows}</tbody>
 </table>
 <script>
@@ -192,6 +204,11 @@ this server. This is a signed evidence log, not a blockchain.</p>
     }} catch (e) {{ /* keep last view on transient errors */ }}
   }}
   setInterval(poll, 2000);
+  async function copyRecord(i) {{
+    const r = await fetch('/evidence.json');
+    const j = await r.json();
+    await navigator.clipboard.writeText(JSON.stringify(j.records[i], null, 2));
+  }}
   async function kick() {{
     const btn = document.getElementById('runbtn');
     const info = document.getElementById('runinfo');
@@ -251,15 +268,28 @@ def _run_direct() -> dict:
     chain grows without any LLM. Rows are marked "direct" via params."""
     from agents import fleet  # deferred: pulls google-adk, never at page load
 
-    sealed_ids = []
     fleet.RUN_MODE = "direct"
     try:
+        best_vendor, best_price = "", float("inf")
         for vendor in list(fleet.MOCK_VENDORS):
             result = fleet.research_vendor(vendor)
-            sealed_ids.append(result.get("evidence_record", "?"))
+            price = result.get("offer", {}).get("unit_price_usd")
+            if isinstance(price, (int, float)) and price < best_price:
+                best_vendor, best_price = vendor, float(price)
+        # The climax beat, scripted: one over-cap attempt the mandate REFUSES
+        # (sealed), then the in-cap alternative goes through (sealed).
+        fleet.check_budget_mandate(best_price)
+        refused = fleet.issue_purchase_intent(best_vendor, 40000.0)
+        issued = fleet.issue_purchase_intent(best_vendor, best_price)
+        fleet.file_expense_record(issued.get("intent_id", "?"), best_vendor, best_price)
+        detail = (
+            f"research x3 → over-cap attempt {refused.get('status')} "
+            f"({refused.get('reason')}) → in-cap intent {issued.get('status')} → expense filed "
+            f"(no model credentials — direct tool calls, every step sealed)"
+        )
     finally:
         fleet.RUN_MODE = ""
-    return {"mode": "direct", "detail": f"research_vendor x{len(sealed_ids)} (no model credentials — sealed via direct tool calls)"}
+    return {"mode": "direct", "detail": detail}
 
 
 def _run_adk() -> dict:

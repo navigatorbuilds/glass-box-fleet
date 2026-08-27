@@ -74,22 +74,32 @@ def check_budget_mandate(amount_usd: float) -> dict:
 
 
 def issue_purchase_intent(vendor_name: str, monthly_amount_usd: float) -> dict:
-    """Issue a purchase INTENT (no real money moves — evidence demo). Sealed; refused over budget."""
+    """Issue a purchase INTENT (no real money moves — evidence demo).
+
+    Enforcement point for the scoped mandate (mandates/demo.json, public
+    policy): an over-cap or expired-mandate amount is NEVER executed — the
+    refusal itself is sealed as evidence with the mandate reference, and it
+    chains exactly like any other record."""
+    from glassbox import mandate
+
     with otel.span("tool.issue_purchase_intent", agent="intent-worker", action="issue_purchase_intent") as _s:
-        if monthly_amount_usd > BUDGET_LIMIT_USD:
+        allowed, reason, m = mandate.check(monthly_amount_usd)
+        if not allowed:
             sealed = emit_record(
                 "intent-worker",
-                "purchase_intent_REFUSED",
-                {"vendor": vendor_name, "amount_usd": monthly_amount_usd,
-                 "reason": f"exceeds mandate budget {BUDGET_LIMIT_USD}"},
+                "purchase_intent.REFUSED",
+                {"vendor": vendor_name, "requested": monthly_amount_usd,
+                 "cap": m.get("cap_eur"), "mandate_ref": m.get("mandate_id"),
+                 "reason": reason},
             )
             otel.set_evidence_attributes(_s, sealed)
-            return {"status": "REFUSED", "reason": "over mandate budget",
+            return {"status": "REFUSED", "reason": reason,
                     "evidence_record": sealed.get("record", {}).get("id", "STUB")}
         sealed = emit_record(
             "intent-worker",
             "issue_purchase_intent",
-            {"vendor": vendor_name, "amount_usd": monthly_amount_usd},
+            {"vendor": vendor_name, "amount_usd": monthly_amount_usd,
+             "mandate_ref": m.get("mandate_id")},
         )
         otel.set_evidence_attributes(_s, sealed)
         return {"status": "issued", "intent_id": sealed.get("record", {}).get("id", "STUB"),

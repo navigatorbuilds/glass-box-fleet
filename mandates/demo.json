@@ -1,0 +1,9 @@
+{
+  "mandate_id": "demo-procurement-2026-08",
+  "agent": "intent-worker",
+  "scope": "procurement",
+  "cap_eur": 5000,
+  "issued": "2026-08-27T00:00:00Z",
+  "expires": "2026-12-31T23:59:59Z",
+  "note": "Public demo policy (committed by design): a scoped mandate capping what the intent worker may commit to per purchase intent. Over-cap attempts are REFUSED and the refusal is sealed as evidence."
+}
