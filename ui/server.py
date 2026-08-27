@@ -258,11 +258,42 @@ def evidence_bundle() -> Response:
     )
 
 
+def _using_vertex() -> bool:
+    """Vertex AI via the runtime service account — no API key anywhere.
+
+    This is the deployed path. The AI Studio key path it replaced is capped at
+    20 requests/day/model on the free tier (verified against a live 429 on
+    2026-08-27), which two judge clicks exhaust."""
+    return os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").upper() in {"1", "TRUE", "YES"} \
+        and bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+
+
 def _have_model_credentials() -> bool:
+    if _using_vertex():
+        return True
     if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
         return True
     adc = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
     return adc.exists()
+
+
+# Spend guard. Moving the model path onto Vertex put it on a project that has a
+# real billing account, so "a judge cannot reach a payment method" is no longer
+# structurally true and must be enforced here instead of asserted in the README.
+# Beyond the cap the run still completes — it degrades to the keyless `direct`
+# path, so the evidence story never breaks, only the model narration stops.
+MODEL_RUNS_PER_DAY = int(os.environ.get("MODEL_RUNS_PER_DAY", "200"))
+_model_budget = {"day": "", "used": 0}
+
+
+def _model_budget_available() -> bool:
+    """Best-effort daily cap on model-backed runs. Per-instance, and the service
+    is pinned to --max-instances=2, so the true ceiling is 2x the configured
+    number — deliberately stated rather than hidden."""
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    if _model_budget["day"] != today:
+        _model_budget.update({"day": today, "used": 0})
+    return _model_budget["used"] < MODEL_RUNS_PER_DAY
 
 
 def _run_direct(why: str = "no model credentials") -> dict:
@@ -397,14 +428,17 @@ def run_fleet(mode: str = "") -> JSONResponse:
         # judge's first click showing an empty chain.)
         if mode == "async":
             result = _run_async()
-        elif _have_model_credentials():
+        elif not _have_model_credentials():
+            result = _run_direct()
+        elif not _model_budget_available():
+            result = _run_direct(why=f"daily model budget of {MODEL_RUNS_PER_DAY} runs reached")
+        else:
+            _model_budget["used"] += 1
             try:
                 result = _run_adk()
             except Exception as e:  # honest fallback, loudly labeled
                 result = _run_direct(why="ADK path unavailable")
                 result["detail"] += f" (adk path failed: {e})"
-        else:
-            result = _run_direct()
         result["at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         _last_run.update(result)
         return JSONResponse(result)
