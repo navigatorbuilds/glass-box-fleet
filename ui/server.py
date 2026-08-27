@@ -388,7 +388,14 @@ def run_fleet(mode: str = "") -> JSONResponse:
     try:
         from glassbox import work
 
-        if mode == "async" or (mode == "" and _have_model_credentials() and work.get_bus().mode == "pubsub"):
+        # The default click must always produce the full seven-record arc,
+        # refusal beat included — that narrative IS the demo. The async bus is
+        # a real Pub/Sub path but it publishes work items and returns before
+        # the chain grows, so it is opt-in via ?mode=async only. (Regression
+        # caught 2026-08-27: setting GOOGLE_CLOUD_PROJECT for Firestore flipped
+        # the bus to pubsub, which silently made async the default and left a
+        # judge's first click showing an empty chain.)
+        if mode == "async":
             result = _run_async()
         elif _have_model_credentials():
             try:
