@@ -18,7 +18,7 @@ mandate, issue a purchase intent, file the expense — and **seals each step the
 One step is deliberately over budget: the fleet refuses it, and *the refusal itself is sealed*. That
 is the whole thesis in one frame — the evidence is strongest exactly where the agent said no.
 
-A run produces seven records, in this order:
+Each run appends seven records to the chain, in this order:
 
 | # | `gbx_action` | what it is |
 |---|---|---|
@@ -28,8 +28,9 @@ A run produces seven records, in this order:
 | 6 | `issue_purchase_intent` | the in-cap intent that was allowed |
 | 7 | `file_expense_record` | the expense filed against it |
 
-Every record is wire-format v7, `sig_algorithm = 1` (ML-DSA-65 / FIPS 204), `network_id =
-glass-box-demo`. The purchase-intent vocabulary is deliberately **AP2-shaped** — it borrows the
+The log is append-only, so a second click adds seven more and the chain keeps growing across runs —
+that is the point of hash-linking, not a bug. Every record is wire-format v7, `sig_algorithm = 1`
+(ML-DSA-65 / FIPS 204), `network_id = glass-box-demo`. The purchase-intent vocabulary is deliberately **AP2-shaped** — it borrows the
 Checkout-Mandate framing of Google's Agent Payments Protocol so the evidence slots into that world.
 It is *not* an AP2 conformance claim, and no money moves: these are intents, not transactions.
 
@@ -141,24 +142,41 @@ before this — the chain you tamper with should be one you watched get created.
 ### Deploy your own
 
 ```bash
+# 1. one-time project setup
+gcloud services enable run.googleapis.com aiplatform.googleapis.com firestore.googleapis.com
+gcloud firestore databases create --location=europe-west1 --type=firestore-native
+# grant the runtime service account: roles/aiplatform.user, roles/datastore.user
+
+# 2. deploy
 gcloud run deploy glass-box-fleet --source . --region europe-west1 \
-  --allow-unauthenticated --max-instances=2
+  --allow-unauthenticated --max-instances=2 \
+  --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_LOCATION=global,\
+GOOGLE_CLOUD_PROJECT=your-project,FIRESTORE=1,MODEL_RUNS_PER_DAY=200
 
 # optional persistent signer (otherwise a fresh demo identity per revision):
 #   --set-secrets=/secrets/identity.json=YOUR_SECRET:latest
 #   --set-env-vars=SEALER_IDENTITY=/secrets/identity.json
-# optional durable chain across cold starts:
-#   --set-env-vars=FIRESTORE=1,GOOGLE_CLOUD_PROJECT=your-project
 ```
 
-Note that `--set-secrets` **replaces** the whole secret set on each call — pass every secret you want
-in one command, or you will silently drop the others.
+Two gotchas worth the ink:
 
-**A note on billing, because it is part of the design.** The model key and the infrastructure live in
-two separate Google Cloud projects: the project holding the Gemini key has billing disabled outright,
-so no amount of judge traffic can reach a payment method, while the infrastructure project carries
-the billing account, a $5 budget alert, and a hard `--max-instances=2` cap. A demo that anyone can
-hammer should not be able to bankrupt its author.
+- `--set-secrets` and `--set-env-vars` **replace** the whole set on each call. Use
+  `--update-env-vars` for additive changes, or you will silently drop the others.
+- `gemini-3.5-flash` is **not** served from `europe-west1` on Vertex — it is served from the
+  `global` location, hence `GOOGLE_CLOUD_LOCATION=global` while the service itself runs in Europe.
+
+**A note on billing, because it is part of the design.** Inference runs on Vertex AI under the Cloud
+Run service account — there is no API key anywhere in the system to leak or rotate. That is the right
+call for an enterprise story, but it does put inference on a project with a live billing account, so
+the spend guard has to be *enforced* rather than asserted: `--max-instances=2`, a $5 budget alert,
+and a daily cap on model-backed runs (`MODEL_RUNS_PER_DAY`, default 200 per instance). Past the cap
+the fleet keeps running — it degrades to the keyless `direct` path, so the evidence arc still
+completes end to end and only the model narration stops. A demo anyone can hammer should not be able
+to bankrupt its author, and "should not" needs to be code.
+
+> This replaced an earlier AI Studio API-key setup. Worth knowing if you build something similar: the
+> Gemini free tier allows **20 `generateContent` requests per day, per model** — roughly two runs of
+> this demo. It fails as a 429, and a graceful fallback will hide it from you.
 
 ## Honest limits
 

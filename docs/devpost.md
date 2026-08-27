@@ -21,11 +21,13 @@ It catches bad input, refuses unauthorized actions, and makes tampering with its
 detectable. **Don't trust the demo — verify it.**
 
 ## How we built it (stack mandate)
-- **Gemini (`gemini-3.5-flash`)** — all agent reasoning, thinking disabled so the live run stays
-  inside the demo's latency budget.
+- **Gemini (`gemini-3.5-flash`) on Vertex AI** — all agent reasoning, authenticated with the Cloud
+  Run service account rather than an API key, so no key exists in the system to leak or rotate.
+  Thinking is disabled so the live run stays inside the demo's latency budget.
 - **Google ADK (Python)** — orchestrator + two workers with tool-level delegation.
-- **Cloud Run** — the entire backend (fleet + sealer + UI) in one self-contained service.
-- **Firestore** — evidence record persistence.
+- **Cloud Run** — the entire backend (fleet + sealer + UI) in one self-contained service,
+  `--max-instances=2` with a daily model-run cap that degrades to a keyless path instead of failing.
+- **Firestore** — evidence record persistence across cold starts and revisions.
 - Sealer: a small Rust service built on the published `elara-record` crate — ML-DSA-65
   (FIPS 204) signatures, content hashing, per-run hash-linking.
 - Registry, receipt-chain UI, OpenTelemetry spans → Cloud Trace for observability.
