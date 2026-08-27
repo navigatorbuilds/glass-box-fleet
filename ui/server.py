@@ -166,13 +166,17 @@ def rows_fragment() -> str:
             else html.escape(r["action"])
         )
         mode_mark = f' <em>({html.escape(r["mode"])})</em>' if r["mode"] else ""
+        # Show enough of the id to match a verifier's verdict line without
+        # letting a 36-char uuid triple the row height. Full record: copy JSON.
+        rid = r["record_id"]
+        rid_short = f"{rid[:13]}…" if len(rid) > 14 else rid
         out.append(
             "<tr>"
             f'<td>{r["index"]}</td>'
             f'<td>{html.escape(r["agent"])}</td>'
             f"<td>{action_cell}{mode_mark}</td>"
             f'<td>{html.escape(r["ts"])}</td>'
-            f'<td class="mono">{html.escape(r["record_id"])}</td>'
+            f'<td class="mono" title="{html.escape(rid)}">{html.escape(rid_short)}</td>'
             f'<td><span class="badge {badge_class}">{r["badge"]}</span></td>'
             f'<td><button class="copy" onclick="copyRecord({r["index"]})">copy JSON</button></td>'
             "</tr>"
@@ -183,20 +187,39 @@ def rows_fragment() -> str:
 PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Glass-Box Fleet — receipt chain</title>
 <style>
-  body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #111; }}
-  h1 {{ font-size: 1.3rem; }} .sub {{ color: #555; max-width: 60rem; }}
-  table {{ border-collapse: collapse; margin-top: 1rem; width: 100%; }}
-  th, td {{ text-align: left; padding: .35rem .6rem; border-bottom: 1px solid #ddd; font-size: .9rem; }}
-  .mono {{ font-family: ui-monospace, monospace; font-size: .8rem; }}
-  .badge {{ padding: .1rem .5rem; border-radius: .6rem; font-weight: 600; font-size: .8rem; }}
-  .ok {{ background: #d7f5dd; color: #135b22; }}
-  .broken {{ background: #ffd6d6; color: #8f0d0d; }}
+  :root {{ --bg:#0d1117; --panel:#161b22; --line:#26303d; --fg:#e6edf3; --dim:#9aa7b4; }}
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: system-ui, sans-serif; margin: 0; padding: 1.6rem 2rem 2.5rem;
+         background: var(--bg); color: var(--fg); font-size: 17px; }}
+  h1 {{ font-size: 1.55rem; margin: 0 0 .5rem; letter-spacing: -.01em; }}
+  .sub {{ color: var(--dim); max-width: 62rem; line-height: 1.5; margin: 0 0 1.2rem; }}
+  .sub code {{ background: var(--panel); padding: .1rem .35rem; border-radius: .25rem;
+               font-family: ui-monospace, monospace; font-size: .92em; color: #cfe3ff;
+               white-space: nowrap; }}
+  table {{ border-collapse: collapse; margin-top: 1rem; width: 100%;
+           background: var(--panel); border-radius: .5rem; overflow: hidden; }}
+  th, td {{ text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--line); }}
+  th {{ font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
+        background: #11161d; font-weight: 600; }}
+  td {{ font-size: 1rem; white-space: nowrap; }}
+  tbody tr:last-child td {{ border-bottom: none; }}
+  .mono {{ font-family: ui-monospace, monospace; font-size: .9rem; color: #a9c7ff; }}
+  .badge {{ padding: .15rem .6rem; border-radius: .7rem; font-weight: 700; font-size: .85rem;
+            display: inline-block; white-space: nowrap; }}
+  .ok {{ background: #123d20; color: #56d364; }}
+  .broken {{ background: #4a1010; color: #ff7b72; }}
   .stub {{ background: #ff2d2d; color: #fff; }}
   .refused {{ background: #8f0d0d; color: #fff; }}
-  .copy {{ font-size: .75rem; padding: .15rem .5rem; }}
-  .empty {{ color: #777; font-style: italic; }}
-  button {{ padding: .4rem 1rem; font-size: 1rem; cursor: pointer; }}
-  #runinfo {{ margin-left: 1rem; color: #555; }}
+  .copy {{ font-size: .8rem; padding: .25rem .7rem; background: #21262d; color: var(--fg);
+           border: 1px solid var(--line); border-radius: .35rem; cursor: pointer; }}
+  .empty {{ color: var(--dim); font-style: italic; }}
+  button {{ padding: .55rem 1.3rem; font-size: 1.05rem; cursor: pointer; font-weight: 600;
+            background: #1f6feb; color: #fff; border: 0; border-radius: .4rem; }}
+  button:disabled {{ background: #30363d; color: var(--dim); }}
+  #runinfo {{ margin-left: 1rem; color: var(--dim); font-size: .95rem; }}
+  /* A row that has just been sealed announces itself, then settles. */
+  @keyframes seal {{ from {{ background: #1d3a5c; }} to {{ background: transparent; }} }}
+  tbody tr.fresh {{ animation: seal 1.6s ease-out; }}
 </style></head>
 <body>
 <h1>Glass-Box Fleet — receipt chain</h1>
@@ -211,13 +234,24 @@ this server. This is a signed evidence log, not a blockchain.</p>
 <tbody id="rows">{rows}</tbody>
 </table>
 <script>
+  // Repaint only when the chain actually grew, and mark just the rows that are
+  // new — otherwise every poll would re-flash the whole table.
+  let lastHtml = null;
   async function poll() {{
     try {{
       const r = await fetch('/?fragment=1');
-      document.getElementById('rows').innerHTML = await r.text();
+      const html = await r.text();
+      if (html === lastHtml) return;
+      const tbody = document.getElementById('rows');
+      const before = tbody.querySelectorAll('tr').length;
+      tbody.innerHTML = html;
+      lastHtml = html;
+      tbody.querySelectorAll('tr').forEach((tr, i) => {{
+        if (i >= before) tr.classList.add('fresh');
+      }});
     }} catch (e) {{ /* keep last view on transient errors */ }}
   }}
-  setInterval(poll, 2000);
+  setInterval(poll, 1000);
   async function copyRecord(i) {{
     const r = await fetch('/evidence.json');
     const j = await r.json();

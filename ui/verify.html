@@ -15,7 +15,9 @@
   input[type=file] { color: var(--dim); font-size: .95rem; }
   table { border-collapse: collapse; margin-top: 1rem; width: 100%;
           background: var(--panel); border-radius: .5rem; overflow: hidden; }
-  td, th { border-bottom: 1px solid var(--line); padding: .55rem .8rem; font-size: 1rem; text-align: left; }
+  td, th { border-bottom: 1px solid var(--line); padding: .55rem .8rem; font-size: 1rem;
+           text-align: left; white-space: nowrap; }
+  td:last-child, th:last-child { white-space: normal; }
   th { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--dim);
        background: #11161d; font-weight: 600; }
   tr:last-child td { border-bottom: none; }
@@ -164,7 +166,10 @@ function render(rawList) {
     try {
       const v = verify_record_offline(raw);
       const verified = typeof v.verdict === "string" && v.verdict.toUpperCase().includes("VERIF");
-      verdictText = `${v.glyph ?? ""} ${v.verdict ?? ""} — ${(v.headline ?? "").slice(0, 80)}`;
+      // The engine's headline restates the verdict and then keeps going; show
+      // the verdict once and only its first sentence of reasoning.
+      const why = String(v.headline ?? "").replace(/^[^—]*—\s*/, "").split(/\.\s/)[0];
+      verdictText = `${v.glyph ?? ""} ${v.verdict ?? ""} — ${why}`;
       cls = verified ? "ok" : "bad";
     } catch (e) {
       verdictText = "verify error: " + e;
