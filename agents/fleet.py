@@ -67,20 +67,26 @@ research_worker = Agent(
     tools=[research_vendor],
 )
 
-BUDGET_LIMIT_USD = 500.0
-
-
 def check_budget_mandate(amount_usd: float) -> dict:
-    """Check a spend amount against the demo mandate budget. The check itself is sealed."""
+    """Check a monthly spend against the scoped mandate. The check itself is sealed.
+
+    Reads `mandates/demo.json` — the same file the enforcement point in
+    issue_purchase_intent reads. One cap, one source of truth: a pre-flight
+    check that could disagree with the thing that actually blocks the spend
+    would be theatre, and the whole point here is that it isn't."""
+    from glassbox import mandate
+
     with otel.span("tool.check_budget_mandate", agent="intent-worker", action="check_budget_mandate") as _s:
-        approved = amount_usd <= BUDGET_LIMIT_USD
+        approved, reason, m = mandate.check(amount_usd)
+        limit = float(m.get("cap_usd", 0))
         sealed = emit_record(
             "intent-worker",
             "check_budget_mandate",
-            {"amount_usd": amount_usd, "limit_usd": BUDGET_LIMIT_USD, "approved": approved},
+            {"amount_usd": amount_usd, "limit_usd": limit, "approved": approved,
+             "reason": reason, "mandate_ref": m.get("mandate_id")},
         )
         otel.set_evidence_attributes(_s, sealed)
-        return {"approved": approved, "limit_usd": BUDGET_LIMIT_USD,
+        return {"approved": approved, "reason": reason, "limit_usd": limit,
                 "evidence_record": sealed.get("record", {}).get("id", "STUB")}
 
 
@@ -100,7 +106,7 @@ def issue_purchase_intent(vendor_name: str, monthly_amount_usd: float) -> dict:
                 "intent-worker",
                 "purchase_intent.REFUSED",
                 {"vendor": vendor_name, "requested": monthly_amount_usd,
-                 "cap": m.get("cap_eur"), "mandate_ref": m.get("mandate_id"),
+                 "cap": m.get("cap_usd"), "mandate_ref": m.get("mandate_id"),
                  "reason": reason},
             )
             otel.set_evidence_attributes(_s, sealed)
@@ -135,11 +141,15 @@ intent_worker = Agent(
     generate_content_config=GEN_CONFIG,
     description="Issues purchase intents under a budget mandate; every step sealed as evidence.",
     instruction=(
-        "You handle purchase intents in a procurement evidence demo. For a chosen vendor: first "
-        "check_budget_mandate for the monthly amount, then issue_purchase_intent, then "
-        "file_expense_record with the returned intent_id. If the mandate check fails or an "
-        "intent is REFUSED, report that plainly — the refusal is itself evidence. Never retry "
-        "a refused amount."
+        "You handle purchase intents in a procurement evidence demo. For a chosen vendor and a "
+        "requested monthly amount: (1) call check_budget_mandate for that amount; (2) call "
+        "issue_purchase_intent for it — attempt it even when the check said no, because the "
+        "refusal is the evidence the demo exists to produce; (3) if the intent comes back "
+        "REFUSED, never retry the same amount — instead reduce the seat count to the largest "
+        "whole number whose monthly total fits under the cap the refusal reported, and issue "
+        "that instead; (4) call file_expense_record with the issued intent_id. Report the "
+        "refusal plainly in your summary, with its evidence record id — an agent that was told "
+        "no, and can prove it, is the result being demonstrated."
     ),
     tools=[check_budget_mandate, issue_purchase_intent, file_expense_record],
 )
@@ -150,11 +160,14 @@ root_agent = Agent(
     generate_content_config=GEN_CONFIG,
     description="Orchestrates the procurement fleet; delegates research and purchasing to workers.",
     instruction=(
-        "You run a procurement evidence demo. When asked to procure storage: (1) delegate "
-        "research on acme-cloud, initech-io and globex-data to the research worker; (2) pick "
-        "the best offer on price+SLA and say why in one line; (3) delegate to the intent worker "
-        "to budget-check, issue the purchase intent and file the expense for the chosen vendor "
-        "at its monthly price. Keep the final summary to a short table plus the record ids."
+        "You run a procurement evidence demo. When asked to procure storage for a number of "
+        "seats: (1) delegate research on acme-cloud, initech-io and globex-data to the research "
+        "worker — exactly one lookup per vendor, three in total; (2) pick the best offer on "
+        "price+SLA and say why in one line; (3) multiply that vendor's unit price by the "
+        "requested seat count to get the monthly total; (4) delegate to the intent worker to "
+        "budget-check, issue the purchase intent for that total, and file the expense. Do not "
+        "pre-emptively shrink the order to fit a budget — order what was asked for and let the "
+        "mandate answer. Keep the final summary to a short table plus the record ids."
     ),
     sub_agents=[research_worker, intent_worker],
 )

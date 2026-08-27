@@ -15,17 +15,22 @@ Built during the All Things Agentic submission period (Aug 27–31, 2026) — se
 
 A procurement fleet runs a recognizable enterprise errand — research vendors, check the budget
 mandate, issue a purchase intent, file the expense — and **seals each step the instant it happens**.
-One step is deliberately over budget: the fleet refuses it, and *the refusal itself is sealed*. That
-is the whole thesis in one frame — the evidence is strongest exactly where the agent said no.
+
+The order it is given does not fit: 400 seats at the best price is $7,800/month against a
+$5,000/month mandate cap ([`mandates/demo.json`](mandates/demo.json), committed in the open — the cap
+is policy, not a secret). Nothing scripts a refusal here; the fleet is told to order what was asked
+for and let the mandate answer. It answers no, **the refusal is sealed as evidence**, and the fleet
+replans down to the 256 seats that do fit. That is the whole thesis in one frame — the evidence is
+strongest exactly where the agent said no.
 
 Each run appends seven records to the chain, in this order:
 
 | # | `gbx_action` | what it is |
 |---|---|---|
 | 1–3 | `research_vendor` | three vendor quotes gathered |
-| 4 | `check_budget_mandate` | scoped mandate read before spending |
-| 5 | `purchase_intent.REFUSED` | over-cap intent **refused**, refusal sealed |
-| 6 | `issue_purchase_intent` | the in-cap intent that was allowed |
+| 4 | `check_budget_mandate` | the $7,800/mo order checked against the scoped mandate |
+| 5 | `purchase_intent.REFUSED` | that order attempted anyway and **refused**, refusal sealed |
+| 6 | `issue_purchase_intent` | the replanned 256-seat order that fits, allowed |
 | 7 | `file_expense_record` | the expense filed against it |
 
 The log is append-only, so a second click adds seven more and the chain keeps growing across runs —

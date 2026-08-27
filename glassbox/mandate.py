@@ -32,6 +32,6 @@ def check(amount: float) -> Tuple[bool, str, dict]:
         expiry_s = time.mktime(time.strptime(expires, "%Y-%m-%dT%H:%M:%SZ"))
         if time.time() > expiry_s:
             return False, "mandate_expired", m
-    if amount > float(m.get("cap_eur", 0)):
+    if amount > float(m.get("cap_usd", 0)):
         return False, "exceeds_mandate_cap", m
     return True, "ok", m

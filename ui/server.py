@@ -313,15 +313,27 @@ def _run_direct(why: str = "no model credentials") -> dict:
             price = result.get("offer", {}).get("unit_price_usd")
             if isinstance(price, (int, float)) and price < best_price:
                 best_vendor, best_price = vendor, float(price)
-        # The climax beat, scripted: one over-cap attempt the mandate REFUSES
-        # (sealed), then the in-cap alternative goes through (sealed).
-        fleet.check_budget_mandate(best_price)
-        refused = fleet.issue_purchase_intent(best_vendor, 40000.0)
-        issued = fleet.issue_purchase_intent(best_vendor, best_price)
-        fleet.file_expense_record(issued.get("intent_id", "?"), best_vendor, best_price)
+        # The climax beat. Same arithmetic the model does on the ADK path, so
+        # both paths tell one story: the full order is over the mandate cap and
+        # is REFUSED (sealed), then the largest order that fits goes through
+        # (sealed). Derived from the mandate file, never a magic number — a
+        # hardcoded over-cap amount would still "work" if someone raised the cap
+        # and stopped being a refusal, silently.
+        from glassbox import mandate
+
+        cap = float(mandate.get_mandate().get("cap_usd", 0))
+        requested = round(best_price * SEATS_REQUESTED, 2)
+        affordable_seats = int(cap // best_price)
+        fits = round(best_price * affordable_seats, 2)
+        fleet.check_budget_mandate(requested)
+        refused = fleet.issue_purchase_intent(best_vendor, requested)
+        issued = fleet.issue_purchase_intent(best_vendor, fits)
+        fleet.file_expense_record(issued.get("intent_id", "?"), best_vendor, fits)
         detail = (
-            f"research x3 → over-cap attempt {refused.get('status')} "
-            f"({refused.get('reason')}) → in-cap intent {issued.get('status')} → expense filed "
+            f"research x3 → {SEATS_REQUESTED} seats at ${requested:,.2f}/mo "
+            f"{refused.get('status')} ({refused.get('reason')}, cap ${cap:,.0f}) → "
+            f"replanned to {affordable_seats} seats at ${fits:,.2f}/mo "
+            f"{issued.get('status')} → expense filed "
             f"({why} — direct tool calls, every step sealed)"
         )
     finally:
@@ -329,7 +341,17 @@ def _run_direct(why: str = "no model credentials") -> dict:
     return {"mode": "direct", "detail": detail}
 
 
-ADK_PROMPT = "Procure object storage for the team within the monthly budget."
+# 400 seats at the cheapest vendor ($19.5/unit) is $7,800/month against a
+# $5,000 mandate cap, so the fleet's honest first attempt is over-cap and the
+# refusal is EMERGENT rather than scripted — the model then has to replan down
+# to a seat count that fits. The old prompt ("within the monthly budget") let
+# the model quietly stay in-cap and the refusal record never appeared, which
+# removed the one beat the whole submission is about.
+SEATS_REQUESTED = 400
+ADK_PROMPT = (
+    f"Procure object storage for the whole fleet: {SEATS_REQUESTED} seats, billed monthly. "
+    "Work under the standing procurement mandate."
+)
 ADK_USER_ID = "glassbox-demo"
 
 
