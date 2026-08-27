@@ -4,3 +4,4 @@ fastapi
 uvicorn
 opentelemetry-sdk>=1.42
 opentelemetry-exporter-gcp-trace==1.15.0
+google-cloud-pubsub>=2.23

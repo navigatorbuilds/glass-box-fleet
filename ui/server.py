@@ -264,12 +264,36 @@ def _run_adk() -> dict:
     return {"mode": "adk", "detail": f"{len(events)} events"}
 
 
+def _run_async() -> dict:
+    """Long-running-async leg: publish the research work items to the bus and
+    return immediately — the background consumer seals records as it drains,
+    and the page's 2s poll shows the chain grow. Pub/Sub when configured;
+    the in-process bus otherwise (same interface, keyless-green). The dispatch
+    path is sealed INSIDE each record's params (run_mode async / async-local)."""
+    from agents import fleet  # deferred (google-adk import)
+    from glassbox import work
+
+    bus = work.get_bus()
+    bus.start_consumer(work.execute_work_item)
+    run_mode = "async" if bus.mode == "pubsub" else "async-local"
+    for vendor in list(fleet.MOCK_VENDORS):
+        bus.publish({"tool": "research_vendor", "args": {"vendor_name": vendor}, "run_mode": run_mode})
+    return {
+        "mode": run_mode,
+        "detail": f"3 work items published to the {bus.mode} bus; the chain grows as the consumer completes them",
+    }
+
+
 @app.post("/run")
-def run_fleet() -> JSONResponse:
+def run_fleet(mode: str = "") -> JSONResponse:
     if not _run_lock.acquire(blocking=False):
         return JSONResponse({"mode": "busy", "detail": "a run is already in progress"}, status_code=409)
     try:
-        if _have_model_credentials():
+        from glassbox import work
+
+        if mode == "async" or (mode == "" and _have_model_credentials() and work.get_bus().mode == "pubsub"):
+            result = _run_async()
+        elif _have_model_credentials():
             try:
                 result = _run_adk()
             except Exception as e:  # honest fallback, loudly labeled
