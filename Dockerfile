@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY agents/ agents/
 COPY glassbox/ glassbox/
 COPY ui/ ui/
+COPY mandates/ mandates/
 COPY --from=sealer-build /build/sealer/target/release/sealer /app/sealer/target/release/sealer
 ENV GLASSBOX_EVIDENCE_DIR=/tmp/evidence
 # SEALER_IDENTITY is mounted via Secret Manager at deploy time — never baked into the image.
