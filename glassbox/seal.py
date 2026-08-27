@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from glassbox import otel
+from glassbox import store
 
 EVIDENCE_DIR = Path(os.environ.get("GLASSBOX_EVIDENCE_DIR", "evidence"))
 SEALER_BIN = os.environ.get("GLASSBOX_SEALER", "sealer/target/release/sealer")
@@ -53,4 +54,7 @@ def emit_record(agent: str, action: str, params: dict) -> dict:
             record = {"UNSIGNED_STUB": True, "event": event}
     with RUN_LOG.open("a") as f:
         f.write(json.dumps(record) + "\n")
+    if "UNSIGNED_STUB" not in record:
+        # Durable mirror (Cloud Run's FS is ephemeral); guarded no-op locally.
+        store.append(record)
     return record

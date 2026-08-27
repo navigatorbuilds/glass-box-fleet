@@ -75,6 +75,28 @@ FLEET_REGISTRY = [
 ]
 
 
+def load_envelopes() -> list[dict]:
+    """Sealed envelopes in chain order — Firestore mirror when FIRESTORE=1 and
+    reachable (Cloud Run: survives revisions), else the local jsonl. Parse
+    failures become {"UNPARSEABLE_LINE": raw} sentinels."""
+    from glassbox import store
+
+    remote = store.read_all()
+    if remote is not None:
+        return remote
+    out: list[dict] = []
+    if RUN_LOG.exists():
+        for raw in RUN_LOG.read_text().splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                out.append(json.loads(raw))
+            except json.JSONDecodeError:
+                out.append({"UNPARSEABLE_LINE": raw})
+    return out
+
+
 def read_rows() -> list[dict]:
     """Parse the evidence log into display rows with a continuity badge.
 
@@ -84,16 +106,9 @@ def read_rows() -> list[dict]:
     pre-sealer wiring — loud, red, never presentable.
     """
     rows: list[dict] = []
-    if not RUN_LOG.exists():
-        return rows
     expected_prev = GENESIS_PREV
-    for i, raw in enumerate(RUN_LOG.read_text().splitlines()):
-        raw = raw.strip()
-        if not raw:
-            continue
-        try:
-            line = json.loads(raw)
-        except json.JSONDecodeError:
+    for i, line in enumerate(load_envelopes()):
+        if "UNPARSEABLE_LINE" in line:
             rows.append({"index": i, "badge": "BROKEN", "agent": "?", "action": "unparseable line",
                          "ts": "", "record_id": "", "mode": ""})
             continue
@@ -206,15 +221,7 @@ def agents() -> JSONResponse:
 
 @app.get("/evidence.json")
 def evidence_bundle() -> Response:
-    records = []
-    if RUN_LOG.exists():
-        for raw in RUN_LOG.read_text().splitlines():
-            raw = raw.strip()
-            if raw:
-                try:
-                    records.append(json.loads(raw))
-                except json.JSONDecodeError:
-                    records.append({"UNPARSEABLE_LINE": raw})
+    records = load_envelopes()
     body = json.dumps(
         {
             "bundle": "glass-box-fleet evidence log",
