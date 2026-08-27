@@ -2,3 +2,5 @@ google-adk==2.8.0
 google-cloud-firestore
 fastapi
 uvicorn
+opentelemetry-sdk>=1.42
+opentelemetry-exporter-gcp-trace==1.15.0

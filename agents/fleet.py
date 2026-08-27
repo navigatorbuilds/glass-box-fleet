@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from google.adk.agents import Agent  # noqa: E402
 
 from glassbox.seal import emit_record  # noqa: E402
+from glassbox import otel  # noqa: E402
 
 MOCK_VENDORS = {
     "acme-cloud": {"product": "Object storage", "unit_price_usd": 21.0, "sla": "99.9%"},
@@ -29,17 +30,19 @@ RUN_MODE = ""
 
 def research_vendor(vendor_name: str) -> dict:
     """Look up a vendor's offer (canned demo data). Emits a sealed evidence record."""
-    offer = MOCK_VENDORS.get(vendor_name, {"error": "unknown vendor"})
-    params = {"vendor": vendor_name, "offer": offer}
-    if RUN_MODE:
-        params["run_mode"] = RUN_MODE
-    sealed = emit_record("research-worker", "research_vendor", params)
-    inner = sealed.get("record", {})
-    return {
-        "offer": offer,
-        "evidence_record": inner.get("id", "STUB"),
-        "record_hash": sealed.get("record_hash", ""),
-    }
+    with otel.span("tool.research_vendor", agent="research-worker", action="research_vendor") as _s:
+        offer = MOCK_VENDORS.get(vendor_name, {"error": "unknown vendor"})
+        params = {"vendor": vendor_name, "offer": offer}
+        if RUN_MODE:
+            params["run_mode"] = RUN_MODE
+        sealed = emit_record("research-worker", "research_vendor", params)
+        otel.set_evidence_attributes(_s, sealed)
+        inner = sealed.get("record", {})
+        return {
+            "offer": offer,
+            "evidence_record": inner.get("id", "STUB"),
+            "record_hash": sealed.get("record_hash", ""),
+        }
 
 
 research_worker = Agent(
@@ -58,44 +61,51 @@ BUDGET_LIMIT_USD = 500.0
 
 def check_budget_mandate(amount_usd: float) -> dict:
     """Check a spend amount against the demo mandate budget. The check itself is sealed."""
-    approved = amount_usd <= BUDGET_LIMIT_USD
-    sealed = emit_record(
-        "intent-worker",
-        "check_budget_mandate",
-        {"amount_usd": amount_usd, "limit_usd": BUDGET_LIMIT_USD, "approved": approved},
-    )
-    return {"approved": approved, "limit_usd": BUDGET_LIMIT_USD,
-            "evidence_record": sealed.get("record", {}).get("id", "STUB")}
+    with otel.span("tool.check_budget_mandate", agent="intent-worker", action="check_budget_mandate") as _s:
+        approved = amount_usd <= BUDGET_LIMIT_USD
+        sealed = emit_record(
+            "intent-worker",
+            "check_budget_mandate",
+            {"amount_usd": amount_usd, "limit_usd": BUDGET_LIMIT_USD, "approved": approved},
+        )
+        otel.set_evidence_attributes(_s, sealed)
+        return {"approved": approved, "limit_usd": BUDGET_LIMIT_USD,
+                "evidence_record": sealed.get("record", {}).get("id", "STUB")}
 
 
 def issue_purchase_intent(vendor_name: str, monthly_amount_usd: float) -> dict:
     """Issue a purchase INTENT (no real money moves — evidence demo). Sealed; refused over budget."""
-    if monthly_amount_usd > BUDGET_LIMIT_USD:
+    with otel.span("tool.issue_purchase_intent", agent="intent-worker", action="issue_purchase_intent") as _s:
+        if monthly_amount_usd > BUDGET_LIMIT_USD:
+            sealed = emit_record(
+                "intent-worker",
+                "purchase_intent_REFUSED",
+                {"vendor": vendor_name, "amount_usd": monthly_amount_usd,
+                 "reason": f"exceeds mandate budget {BUDGET_LIMIT_USD}"},
+            )
+            otel.set_evidence_attributes(_s, sealed)
+            return {"status": "REFUSED", "reason": "over mandate budget",
+                    "evidence_record": sealed.get("record", {}).get("id", "STUB")}
         sealed = emit_record(
             "intent-worker",
-            "purchase_intent_REFUSED",
-            {"vendor": vendor_name, "amount_usd": monthly_amount_usd,
-             "reason": f"exceeds mandate budget {BUDGET_LIMIT_USD}"},
+            "issue_purchase_intent",
+            {"vendor": vendor_name, "amount_usd": monthly_amount_usd},
         )
-        return {"status": "REFUSED", "reason": "over mandate budget",
+        otel.set_evidence_attributes(_s, sealed)
+        return {"status": "issued", "intent_id": sealed.get("record", {}).get("id", "STUB"),
                 "evidence_record": sealed.get("record", {}).get("id", "STUB")}
-    sealed = emit_record(
-        "intent-worker",
-        "issue_purchase_intent",
-        {"vendor": vendor_name, "amount_usd": monthly_amount_usd},
-    )
-    return {"status": "issued", "intent_id": sealed.get("record", {}).get("id", "STUB"),
-            "evidence_record": sealed.get("record", {}).get("id", "STUB")}
 
 
 def file_expense_record(intent_id: str, vendor_name: str, amount_usd: float) -> dict:
     """File the expense entry for an issued intent. Sealed."""
-    sealed = emit_record(
-        "intent-worker",
-        "file_expense_record",
-        {"intent_id": intent_id, "vendor": vendor_name, "amount_usd": amount_usd},
-    )
-    return {"status": "filed", "evidence_record": sealed.get("record", {}).get("id", "STUB")}
+    with otel.span("tool.file_expense_record", agent="intent-worker", action="file_expense_record") as _s:
+        sealed = emit_record(
+            "intent-worker",
+            "file_expense_record",
+            {"intent_id": intent_id, "vendor": vendor_name, "amount_usd": amount_usd},
+        )
+        otel.set_evidence_attributes(_s, sealed)
+        return {"status": "filed", "evidence_record": sealed.get("record", {}).get("id", "STUB")}
 
 
 intent_worker = Agent(
