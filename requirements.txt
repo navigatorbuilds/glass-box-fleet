@@ -1,0 +1,4 @@
+google-adk==2.8.0
+google-cloud-firestore
+fastapi
+uvicorn
