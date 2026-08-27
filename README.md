@@ -183,7 +183,9 @@ Two more things measured the hard way, both of which fail *silently* into the fa
 ### Deploy your own
 
 Optional, and it fits in the always-free tier — Cloud Run's free grant is 2M requests/month and this
-scales to zero.
+scales to zero. One caveat worth knowing before you start: the free tier still requires a billing
+account linked to the project. With billing unlinked, these commands are refused outright — free
+tier is not the same as no-billing-account. Everything above this section runs without any of it.
 
 ```bash
 gcloud services enable run.googleapis.com firestore.googleapis.com
