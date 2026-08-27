@@ -29,7 +29,7 @@ Nenad approves final cut (his Devpost account). Disclosure caption card at the c
 - [ ] Fresh /run immediately before recording (chain starts clean, <10 rows — legible).
 - [ ] Terminal font ≥16pt; browser zoom 125%; single 1080p display region.
 - [ ] The tamper take: pre-choose the byte (a visible price digit), rehearse undo.
-- [ ] Wifi-toggle beat: verify page ALREADY LOADED before toggling (wasm cached — honest:
+- [ ] Wifi-toggle shot: verify page ALREADY LOADED before toggling (wasm cached — honest:
       caption says "no network after load").
 - [ ] Lyria background bed (+0.2) if bonus lane lands; else silent + captions.
 - [ ] End-card: repo URL + live URL + "verify offline" command.
