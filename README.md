@@ -6,7 +6,11 @@ OFFLINE, on their own machine, with an open-source verifier that never phones ho
 
 **Don't trust the demo — verify it.**
 
-Live demo: <https://glass-box-fleet-795914174700.europe-west1.run.app>
+**Runs on your machine in about two minutes, with no cloud account, no API key and no card**
+([Spin-up](#spin-up)). There is deliberately no hosted instance to trust: the claim of this project
+is that you do not have to take anyone's word for the evidence, and a live URL I control would be
+exactly the wrong thing to ask you to take my word for. Deploy it yourself if you want one
+([Deploy your own](#deploy-your-own)) — it fits inside Google Cloud's always-free tier.
 
 Built during the All Things Agentic submission period (Aug 27–31, 2026) — see
 [DISCLOSURE](#disclosure-pre-existing-work-incorporated) for exactly which parts are pre-existing.
@@ -41,10 +45,11 @@ It is *not* an AP2 conformance claim, and no money moves: these are intents, not
 
 ## Architecture
 
-ADK (Python) orchestrator + Gemini workers on Cloud Run → each tool action → `sealer` (Rust, built
-on the published `elara-record` crate) → signed hash-linked record → Firestore mirror + per-run
-downloadable `evidence.json` → verified with the published `elara-verify` (terminal or in-browser
-WASM). Full diagram and trust boundaries: [`docs/architecture.md`](docs/architecture.md).
+An ADK (Python) orchestrator calls two Gemini workers as tools — research and intents — and each
+tool action goes to `sealer` (Rust, built on the published `elara-record` crate) → signed
+hash-linked record → per-run downloadable `evidence.json`, mirrored to Firestore when deployed →
+verified with the published `elara-verify` (terminal or in-browser WASM). Runs locally as-is;
+Cloud Run is optional. Full diagram and trust boundaries: [`docs/architecture.md`](docs/architecture.md).
 
 Verdicts are `CONSISTENT` — offline evidence-integrity — never "authorized" or "on-chain". This is a
 signed evidence log, not a blockchain (see [Honest limits](#honest-limits)).
@@ -144,44 +149,70 @@ record 1 (01a0429b-337a-7dc2-98dc-852ab4442aed): stored record_hash does not mat
 Exit code 1, and it names the record that lied. (`evidence/` is gitignored, so run the fleet once
 before this — the chain you tamper with should be one you watched get created.)
 
-### Deploy your own
+### Turn the model on (optional, free)
+
+The fleet runs its whole evidence arc with no model at all. To watch Gemini actually orchestrate it,
+get an AI Studio key — free, no billing account, no card:
 
 ```bash
-# 1. one-time project setup
-gcloud services enable run.googleapis.com aiplatform.googleapis.com firestore.googleapis.com
-gcloud firestore databases create --location=europe-west1 --type=firestore-native
-# grant the runtime service account: roles/aiplatform.user, roles/datastore.user
-
-# 2. deploy
-gcloud run deploy glass-box-fleet --source . --region europe-west1 \
-  --allow-unauthenticated --max-instances=2 \
-  --update-env-vars GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_LOCATION=global,\
-GOOGLE_CLOUD_PROJECT=your-project,FIRESTORE=1,MODEL_RUNS_PER_DAY=200
-
-# optional persistent signer (otherwise a fresh demo identity per revision):
-#   --set-secrets=/secrets/identity.json=YOUR_SECRET:latest
-#   --set-env-vars=SEALER_IDENTITY=/secrets/identity.json
+export GOOGLE_API_KEY=...        # aistudio.google.com/apikey
+PORT=8080 .venv/bin/python -m ui.server
 ```
 
-Two gotchas worth the ink:
+The run then reports `"mode":"adk"` instead of `"mode":"direct"`, and three agents on three models
+divide the errand between them.
 
-- `--set-secrets` and `--set-env-vars` **replace** the whole set on each call. Use
-  `--update-env-vars` for additive changes, or you will silently drop the others.
-- `gemini-3.5-flash` is **not** served from `europe-west1` on Vertex — it is served from the
-  `global` location, hence `GOOGLE_CLOUD_LOCATION=global` while the service itself runs in Europe.
+> **The free tier is 20 `generateContent` requests per day — per project, *per model*.** That last
+> word is the useful part, and it is why this fleet runs `gemini-3.7-flash` (orchestrator),
+> `gemini-3.6-flash` (intents) and `gemini-3.5-flash-lite` (research) rather than one model three
+> times: three models are three separate daily buckets. Exhaustion arrives as a `429`, and any
+> graceful fallback — including this one — will hide it from you unless you read the `mode` field.
 
-**A note on billing, because it is part of the design.** Inference runs on Vertex AI under the Cloud
-Run service account — there is no API key anywhere in the system to leak or rotate. That is the right
-call for an enterprise story, but it does put inference on a project with a live billing account, so
-the spend guard has to be *enforced* rather than asserted: `--max-instances=2`, a $5 budget alert,
-and a daily cap on model-backed runs (`MODEL_RUNS_PER_DAY`, default 200 per instance). Past the cap
-the fleet keeps running — it degrades to the keyless `direct` path, so the evidence arc still
-completes end to end and only the model narration stops. A demo anyone can hammer should not be able
-to bankrupt its author, and "should not" needs to be code.
+Two more things measured the hard way, both of which fail *silently* into the fallback path:
 
-> This replaced an earlier AI Studio API-key setup. Worth knowing if you build something similar: the
-> Gemini free tier allows **20 `generateContent` requests per day, per model** — roughly two runs of
-> this demo. It fails as a 429, and a graceful fallback will hide it from you.
+- `thinking_budget=0` is **not** universally accepted. `gemini-3.7-flash` takes it;
+  `gemini-3.6-flash` and `gemini-3.5-flash-lite` reject it with a bare `400 INVALID_ARGUMENT` that
+  names no field. Hence `THINKING_OPTIONAL` in [`agents/fleet.py`](agents/fleet.py) — opt in per
+  model, never assume.
+- Workers are attached as `AgentTool`s, **not** as `sub_agents`. ADK's `transfer_to_agent` hands over
+  control: the worker becomes the active agent, answers the user directly, and the orchestrator's
+  task context does not travel with it. Live, that produced a research worker replying *"I require
+  the specific list of vendor names"* and a chain that ended after the research beats — no budget
+  check, no refusal, no expense.
+
+### Deploy your own
+
+Optional, and it fits in the always-free tier — Cloud Run's free grant is 2M requests/month and this
+scales to zero.
+
+```bash
+gcloud services enable run.googleapis.com firestore.googleapis.com
+gcloud firestore databases create --location=europe-west1 --type=firestore-native
+# grant the runtime service account roles/datastore.user
+
+gcloud run deploy glass-box-fleet --source . --region europe-west1 \
+  --allow-unauthenticated --max-instances=2 \
+  --update-env-vars GOOGLE_CLOUD_PROJECT=your-project,FIRESTORE=1,MODEL_RUNS_PER_DAY=40 \
+  --update-secrets GOOGLE_API_KEY=your-ai-studio-key-secret:latest
+
+# optional persistent signer (otherwise a fresh demo identity per revision):
+#   --update-secrets /secrets/identity.json=YOUR_SECRET:latest
+#   --update-env-vars SEALER_IDENTITY=/secrets/identity.json
+```
+
+`--set-secrets` and `--set-env-vars` **replace** the whole set on each call — use the `--update-`
+forms for additive changes or you will silently drop the others.
+
+**A note on billing, because it is part of the design.** Inference here runs on an AI Studio key
+whose project has **no billing account attached at all**, which makes overspend structurally
+impossible rather than merely discouraged: the free tier does not degrade into paid usage, it stops
+at `429`. That is a deliberate reversal — an earlier revision of this project ran inference on Vertex
+AI under the Cloud Run service account, which is the cleaner enterprise story (no key to leak or
+rotate) but requires a live billing account, and *a GCP budget is an alert, not a cap*. It emails
+you; it never stops the spend. Since the guarantee this project sells is "you don't have to trust
+anyone", the demo should not require trusting its author's budget discipline either. `MODEL_RUNS_PER_DAY`
+caps model-backed runs on top of that; past the cap the fleet degrades to the keyless `direct` path,
+so the evidence arc still completes and only the model narration stops.
 
 ## Honest limits
 

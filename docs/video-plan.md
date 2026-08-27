@@ -12,8 +12,14 @@ Nenad approves final cut (his Devpost account). Disclosure caption card at the c
    right = receipt chain growing row by row. Beats inside the take: registry view flash
    (/agents), the budget-mandate check sealing, the over-budget intent REFUSED (red row =
    "the refusal is itself evidence" caption), expense filed.
-3. **1:35-1:55 CLOUD PROOF** — one decisive screen: Cloud Run service page (region, revision,
-   URL) + Vertex AI logs if key landed (else Cloud Run logs). No slow pans.
+3. **1:35-1:55 THE MODEL IS ACTUALLY DRIVING** — one decisive screen, replacing the old Cloud Run
+   console shot (there is no hosted instance any more — see README, that is deliberate). Show the
+   `/run` response with `"mode":"adk"` and the event count, next to `agents/fleet.py` with the
+   three model names visible: `gemini-3.7-flash` orchestrating, `gemini-3.6-flash` on intents,
+   `gemini-3.5-flash-lite` on research. Caption: "three agents, three models — and the free tier
+   meters per model, so this runs on a project with no billing account at all." Stronger than a
+   console page: it answers "is a script faking this?", which is what a judge is really asking.
+   No slow pans.
 4. **1:55-2:25 TAMPER (single take)** — download evidence.json → flip one byte in an editor,
    on camera → verifier names the record and fails (exit 1 in terminal) → undo → green.
 5. **2:25-3:05 THE MONEY SHOT** — the judge's experience: open /verify.html → load the bundle →

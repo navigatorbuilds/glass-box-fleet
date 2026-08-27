@@ -8,8 +8,8 @@ The rubric asks whether the video shows proof of action; we took that literally:
 you don't have to take our word for.
 
 ## What it does
-A procurement agent fleet (ADK orchestrator + research and intent workers on Gemini 3.5 via
-Vertex AI) where **every tool action — including refusals — is sealed the instant it happens**
+A procurement agent fleet (an ADK orchestrator calling research and intent workers as tools, each
+on its own Gemini model) where **every tool action — including refusals — is sealed the instant it happens**
 into a post-quantum-signed, hash-linked evidence record. The fleet is cataloged in an agent
 registry; workers act under a budget mandate, and an over-budget purchase intent is **refused,
 with the refusal itself sealed as evidence**. A judge can watch the receipt chain grow live,
@@ -21,12 +21,16 @@ It catches bad input, refuses unauthorized actions, and makes tampering with its
 detectable. **Don't trust the demo — verify it.**
 
 ## How we built it (stack mandate)
-- **Gemini (`gemini-3.5-flash`) on Vertex AI** — all agent reasoning, authenticated with the Cloud
-  Run service account rather than an API key, so no key exists in the system to leak or rotate.
-  Thinking is disabled so the live run stays inside the demo's latency budget.
-- **Google ADK (Python)** — orchestrator + two workers with tool-level delegation.
-- **Cloud Run** — the entire backend (fleet + sealer + UI) in one self-contained service,
-  `--max-instances=2` with a daily model-run cap that degrades to a keyless path instead of failing.
+- **Gemini, three models, one per agent** — `gemini-3.7-flash` orchestrates, `gemini-3.6-flash`
+  handles intents, `gemini-3.5-flash-lite` does research lookups. Not decoration: the free tier
+  meters requests per project *per model*, so three agents on three models draw three separate
+  daily buckets, and the whole fleet runs on an AI Studio key whose project has **no billing
+  account attached** — overspend is structurally impossible, not merely budgeted against.
+- **Google ADK (Python)** — an orchestrator that keeps control, calling both workers as `AgentTool`s
+  rather than transferring to them as `sub_agents`, with HTTP-layer retry so a transient `503`
+  never replays an errand that has already sealed records.
+- **Cloud Run** — the entire backend (fleet + sealer + UI) in one self-contained service, scale-to-zero,
+  `--max-instances=2`, with a daily model-run cap that degrades to a fully keyless path instead of failing.
 - **Firestore** — evidence record persistence across cold starts and revisions.
 - Sealer: a small Rust service built on the published `elara-record` crate — ML-DSA-65
   (FIPS 204) signatures, content hashing, per-run hash-linking.
@@ -77,7 +81,11 @@ repository's own AI contributor, which operates under the entrant's receipted, r
 scope-limited mandate with a public evidence trail.
 
 ## Try it
-- Live demo: https://glass-box-fleet-795914174700.europe-west1.run.app
+- **Run it yourself in about two minutes** — no cloud account, no API key, no card:
+  `pip install -r requirements.txt`, `cargo build --release` in `sealer/`, then
+  `python -m ui.server`. There is deliberately no hosted instance: the claim here is that you don't
+  have to take anyone's word for the evidence, and a live URL we control is exactly the wrong thing
+  to ask you to take our word for. The video shows the same run end to end.
 - Verify offline: `cargo install elara-verify --features cli` → `elara-verify one-record.json`
   (the `--features cli` flag is required — a bare install exits 0 and installs nothing). Or use
   the in-browser WASM verifier: no install, no network, paste any record from the chain.
