@@ -1,0 +1,24 @@
+Glass-Box Fleet
+Copyright 2026 Nenad Vasic
+
+This product includes software developed by Nenad Vasic
+(https://github.com/navigatorbuilds).
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Attribution required by Apache-2.0 section 4(d): any redistribution of this
+work or of a derivative work must carry a readable copy of this NOTICE.
+
+---
+
+Incorporated pre-existing works by the same copyright holder, obtained from
+crates.io under MIT OR Apache-2.0:
+
+  elara-record  =0.3.0   record wire format, ML-DSA-65 (FIPS 204) signing
+  elara-verify   0.3.3   offline verifier (CLI + WASM)
+
+Third-party dependency:
+
+  dilithium-rs  =0.2.0   ML-DSA-65 backend, MIT OR Apache-2.0
+
+The signing-path dependency tree contains no AGPL-licensed code.
