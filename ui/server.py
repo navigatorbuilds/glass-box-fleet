@@ -14,12 +14,14 @@ Routes:       GET /            receipt-chain page (auto-refreshing)
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -263,9 +265,13 @@ def _have_model_credentials() -> bool:
     return adc.exists()
 
 
-def _run_direct() -> dict:
+def _run_direct(why: str = "no model credentials") -> dict:
     """Keyless demo path: exercise the sealed research tool directly so the
-    chain grows without any LLM. Rows are marked "direct" via params."""
+    chain grows without any LLM. Rows are marked "direct" via params.
+
+    `why` states the actual reason this path ran — the fallback from a failed
+    ADK run passes its own, so the detail line never claims "no credentials"
+    on a box that has them."""
     from agents import fleet  # deferred: pulls google-adk, never at page load
 
     fleet.RUN_MODE = "direct"
@@ -285,20 +291,74 @@ def _run_direct() -> dict:
         detail = (
             f"research x3 → over-cap attempt {refused.get('status')} "
             f"({refused.get('reason')}) → in-cap intent {issued.get('status')} → expense filed "
-            f"(no model credentials — direct tool calls, every step sealed)"
+            f"({why} — direct tool calls, every step sealed)"
         )
     finally:
         fleet.RUN_MODE = ""
     return {"mode": "direct", "detail": detail}
 
 
-def _run_adk() -> dict:
-    from agents.fleet import root_agent  # deferred import
-    from google.adk.runners import InMemoryRunner
+ADK_PROMPT = "Procure object storage for the team within the monthly budget."
+ADK_USER_ID = "glassbox-demo"
 
-    runner = InMemoryRunner(agent=root_agent)
-    events = runner.run_debug("Procure object storage for the team within the monthly budget.", quiet=True)
-    return {"mode": "adk", "detail": f"{len(events)} events"}
+
+def _await_blocking(coro):
+    """Drive a coroutine to completion from synchronous code.
+
+    /run is a sync FastAPI endpoint, so it executes on a threadpool worker with
+    no running event loop and asyncio.run() is the correct driver there. The
+    thread branch keeps this honest if it is ever called from inside a loop
+    (asyncio.run() raises rather than nesting)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+async def _run_adk_async() -> dict:
+    """One LLM-orchestrated fleet run under the ADK Runner.
+
+    The whole Runner API is async — run_async() is an async generator and even
+    run_debug() is a coroutine — so the run has to be driven from an event loop.
+    Calling it from sync code just yields an un-awaited coroutine object, which
+    is what produced the "object of type 'coroutine' has no len()" fallback.
+    run_async() is ADK's documented production entrypoint (run_debug is marked
+    debugging-only), so the session is created explicitly and the event stream
+    consumed here."""
+    from agents import fleet  # deferred: pulls google-adk, never at page load
+    from google.adk.runners import InMemoryRunner
+    from google.genai import types
+
+    runner = InMemoryRunner(agent=fleet.root_agent)
+    fleet.RUN_MODE = "adk"  # the dispatch path is sealed INSIDE params, like direct/async
+    try:
+        session = await runner.session_service.create_session(
+            app_name=runner.app_name, user_id=ADK_USER_ID
+        )
+        message = types.Content(role="user", parts=[types.Part(text=ADK_PROMPT)])
+        events, final_text = 0, ""
+        async for event in runner.run_async(
+            user_id=ADK_USER_ID, session_id=session.id, new_message=message
+        ):
+            events += 1
+            if event.is_final_response() and event.content and event.content.parts:
+                final_text = " ".join(
+                    (part.text or "").strip() for part in event.content.parts
+                ).strip()
+    finally:
+        fleet.RUN_MODE = ""
+        await runner.close()
+    summary = final_text.replace("\n", " ")
+    if len(summary) > 400:
+        summary = summary[:400] + "…"
+    detail = f"{events} ADK events (model-orchestrated, every tool call sealed)"
+    return {"mode": "adk", "detail": f"{detail} — {summary}" if summary else detail}
+
+
+def _run_adk() -> dict:
+    return _await_blocking(_run_adk_async())
 
 
 def _run_async() -> dict:
@@ -334,7 +394,7 @@ def run_fleet(mode: str = "") -> JSONResponse:
             try:
                 result = _run_adk()
             except Exception as e:  # honest fallback, loudly labeled
-                result = _run_direct()
+                result = _run_direct(why="ADK path unavailable")
                 result["detail"] += f" (adk path failed: {e})"
         else:
             result = _run_direct()
