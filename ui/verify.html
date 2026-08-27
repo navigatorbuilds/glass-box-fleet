@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Glass-Box Fleet — verify in your browser</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 900px; color: #111; }
+  h1 { font-size: 1.4rem; }
+  .note { color: #444; font-size: 0.92rem; }
+  button { font-size: 1rem; padding: 0.5rem 1rem; margin-right: 0.6rem; }
+  table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
+  td, th { border: 1px solid #ccc; padding: 6px 10px; font-size: 0.9rem; text-align: left; }
+  .ok { background: #e8f5e9; }
+  .bad { background: #ffebee; font-weight: 600; }
+  code { background: #f4f4f4; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<h1>Verify the evidence — in this tab, after load: no network</h1>
+<p class="note">This page runs the open-source <code>elara-verify</code> engine compiled to
+WebAssembly (same core as the crates.io CLI). After the page loads, verification makes
+<b>zero network calls</b> — you can go offline and it still works. A verdict proves each
+record's integrity and signature, never "authorized on some chain".</p>
+<p>
+  <button id="load">Load this service's evidence.json</button>
+  <input type="file" id="file" accept=".json">
+</p>
+<div id="out"></div>
+<script type="module">
+import init, { verify_record_offline } from "./wasm/elara_verify_wasm.js";
+const ready = init();
+
+function render(records) {
+  const rows = records.map((entry, i) => {
+    const rec = entry.record ?? entry;
+    let verdictText = "";
+    let cls = "bad";
+    try {
+      const v = verify_record_offline(JSON.stringify(rec));
+      const verified = typeof v.verdict === "string" && v.verdict.toUpperCase().includes("VERIF");
+      verdictText = `${v.glyph ?? ""} ${v.verdict ?? ""} — ${(v.headline ?? "").slice(0, 80)}`;
+      cls = verified ? "ok" : "bad";
+    } catch (e) {
+      verdictText = "verify error: " + e;
+    }
+    const meta = rec.metadata ?? {};
+    return `<tr class="${cls}"><td>${i}</td><td><code>${(rec.id ?? "?").slice(0, 13)}…</code></td>` +
+           `<td>${meta.action ?? meta.agent ?? ""}</td><td>${verdictText}</td></tr>`;
+  }).join("");
+  document.getElementById("out").innerHTML =
+    `<table><tr><th>#</th><th>record</th><th>action</th><th>verdict</th></tr>${rows}</table>` +
+    `<p class="note">Try it: save the file, flip one character in any record, load it again — ` +
+    `the tampered row goes red. Same check, your machine, no trust required.</p>`;
+}
+
+async function verifyText(text) {
+  await ready;
+  const data = JSON.parse(text);
+  render(data.records ?? data);
+}
+
+document.getElementById("load").onclick = async () => {
+  const r = await fetch("/evidence.json");
+  verifyText(await r.text());
+};
+document.getElementById("file").onchange = async (ev) => {
+  verifyText(await ev.target.files[0].text());
+};
+</script>
+</body>
+</html>

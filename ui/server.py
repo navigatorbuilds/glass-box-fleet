@@ -25,13 +25,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI  # noqa: E402
-from fastapi.responses import HTMLResponse, JSONResponse, Response  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 EVIDENCE_DIR = Path(os.environ.get("GLASSBOX_EVIDENCE_DIR", "evidence"))
 RUN_LOG = EVIDENCE_DIR / "records.jsonl"
 GENESIS_PREV = "0" * 64
 
 app = FastAPI(title="Glass-Box Fleet")
+
+UI_DIR = Path(__file__).resolve().parent
+app.mount("/wasm", StaticFiles(directory=UI_DIR / "wasm"), name="wasm")
+
+
+@app.get("/verify.html")
+def verify_page() -> FileResponse:
+    """In-browser offline verifier (elara-verify compiled to WASM; no network after load)."""
+    return FileResponse(UI_DIR / "verify.html")
 
 # Last run's mode ("adk" | "direct" | error text) — display state only.
 _last_run: dict = {"mode": None, "detail": "", "at": None}
