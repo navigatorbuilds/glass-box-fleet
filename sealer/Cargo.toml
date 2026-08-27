@@ -11,3 +11,7 @@ dilithium-rs = "=0.2.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"
+
+[[bin]]
+name = "sealer"
+path = "src/main.rs"

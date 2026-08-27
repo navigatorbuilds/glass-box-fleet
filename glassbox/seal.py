@@ -34,6 +34,9 @@ def emit_record(agent: str, action: str, params: dict) -> dict:
             capture_output=True,
             text=True,
             timeout=30,
+            # Chain continuity without caller-held state: the sealer reads the
+            # last sealed line of the run log and links the new record to it.
+            env={**os.environ, "SEALER_PREV_FROM": str(RUN_LOG)},
         )
         if out.returncode != 0:
             raise RuntimeError(f"sealer failed: {out.stderr.strip()}")

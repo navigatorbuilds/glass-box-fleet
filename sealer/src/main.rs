@@ -49,12 +49,14 @@ const DEMO_NETWORK_ID: &str = "glass-box-demo";
 /// Field order is the canonical serialization order (struct-order serde),
 /// and `params` objects serialize with sorted keys (serde_json's default
 /// BTreeMap backing) — so the event hash is stable across re-serialization.
+/// `ts` is whatever the emitter uses (ISO-8601 string from the fleet wrapper,
+/// or a number) — it is evidence content, not something the sealer interprets.
 #[derive(Serialize, Deserialize)]
 struct ActionEvent {
     agent: String,
     action: String,
     params: serde_json::Value,
-    ts: f64,
+    ts: serde_json::Value,
 }
 
 /// What binds the chain: the record's content bytes are exactly this,
@@ -242,6 +244,37 @@ fn verify_chain(text: &str) -> Result<usize, String> {
     Ok(count)
 }
 
+fn validate_prev_hex(s: &str) -> Result<String, String> {
+    let p = s.to_lowercase();
+    if p.len() != 64 || !p.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("--prev must be 64 hex chars (a record hash)".to_string());
+    }
+    Ok(p)
+}
+
+/// Chain continuation without caller-held state: read the LAST sealed line of
+/// an existing chain file and use its record_hash as prev. A missing or empty
+/// file starts a fresh chain (genesis prev); a present-but-unparseable tail
+/// line is an error (fail loud, never silently fork the chain).
+fn prev_from_file(path: &str) -> Result<String, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(GENESIS_PREV.to_string())
+        }
+        Err(e) => return Err(format!("reading chain file {path}: {e}")),
+    };
+    match text.lines().rev().find(|l| !l.trim().is_empty()) {
+        None => Ok(GENESIS_PREV.to_string()),
+        Some(last) => {
+            let line: SealedLine = serde_json::from_str(last.trim()).map_err(|e| {
+                format!("chain file {path}: last line is not a sealed record ({e}) — refusing to guess prev")
+            })?;
+            validate_prev_hex(&line.record_hash)
+        }
+    }
+}
+
 fn run() -> Result<(), String> {
     // Stamp the demo network binding once, before any record is created.
     elara_record::record::set_emission_network_id(DEMO_NETWORK_ID)
@@ -256,18 +289,19 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
+    // prev precedence: explicit --prev > --prev-from FILE > SEALER_PREV_FROM
+    // env (the fleet wrapper points this at its append-only records.jsonl so
+    // consecutive actions chain without the caller tracking state) > genesis.
     let prev = match args.len() {
-        1 => GENESIS_PREV.to_string(),
-        3 if args[1] == "--prev" => {
-            let p = args[2].to_lowercase();
-            if p.len() != 64 || !p.bytes().all(|b| b.is_ascii_hexdigit()) {
-                return Err("--prev must be 64 hex chars (a record hash)".to_string());
-            }
-            p
-        }
+        1 => match std::env::var("SEALER_PREV_FROM") {
+            Ok(path) => prev_from_file(&path)?,
+            Err(_) => GENESIS_PREV.to_string(),
+        },
+        3 if args[1] == "--prev" => validate_prev_hex(&args[2])?,
+        3 if args[1] == "--prev-from" => prev_from_file(&args[2])?,
         _ => {
             return Err(
-                "usage: glass-box-sealer [--prev <64-hex>] < event.json\n       glass-box-sealer --verify-chain <chain.jsonl>"
+                "usage: sealer [--prev <64-hex> | --prev-from <chain.jsonl>] < event.json\n       sealer --verify-chain <chain.jsonl>"
                     .to_string(),
             )
         }
@@ -311,8 +345,46 @@ mod tests {
             agent: "buyer-1".into(),
             action: action.into(),
             params: serde_json::json!({"sku": "WIDGET-9", "qty": 3}),
-            ts: 1_756_000_000.0,
+            ts: serde_json::json!(1_756_000_000.0),
         }
+    }
+
+    #[test]
+    fn iso_string_ts_event_seals_and_verifies() {
+        // The fleet wrapper emits ts as an ISO-8601 STRING — the sealer must
+        // treat ts as opaque evidence content, not parse it.
+        let kp = demo_keypair();
+        let event: ActionEvent = serde_json::from_str(
+            r#"{"agent":"buyer-1","action":"create_po","params":{"sku":"W"},"ts":"2026-08-27T06:30:00Z"}"#,
+        )
+        .expect("string-ts event parses");
+        let sealed = seal(&event, GENESIS_PREV, &kp).expect("seal");
+        verify_line(&sealed, 0).expect("line verifies");
+    }
+
+    #[test]
+    fn prev_from_file_reads_last_hash_and_handles_fresh_start() {
+        let kp = demo_keypair();
+        let dir = std::env::temp_dir().join(format!("gbx-prevfrom-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let path = dir.join("records.jsonl");
+        let path_str = path.to_str().expect("utf8 path");
+        // Missing file → genesis.
+        assert_eq!(prev_from_file(path_str).expect("fresh"), GENESIS_PREV);
+        // Two sealed lines → last line's hash.
+        let a = seal(&demo_event("create_po"), GENESIS_PREV, &kp).expect("seal a");
+        let b = seal(&demo_event("approve_po"), &a.record_hash, &kp).expect("seal b");
+        let text = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&a).unwrap(),
+            serde_json::to_string(&b).unwrap()
+        );
+        std::fs::write(&path, text).expect("write chain");
+        assert_eq!(prev_from_file(path_str).expect("tail"), b.record_hash);
+        // Garbage tail → loud error, never a silent fork.
+        std::fs::write(&path, "not json\n").expect("write garbage");
+        assert!(prev_from_file(path_str).is_err(), "garbage tail must error");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn demo_keypair() -> DilithiumKeyPair {
