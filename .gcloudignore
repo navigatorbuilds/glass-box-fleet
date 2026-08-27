@@ -1,0 +1,7 @@
+.venv/
+evidence/
+sealer/target/
+__pycache__/
+*.pyc
+.git/
+*identity*.json
