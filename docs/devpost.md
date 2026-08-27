@@ -66,7 +66,7 @@ scope-limited mandate with a public evidence trail.
 - Live demo: https://glass-box-fleet-795914174700.europe-west1.run.app
 - Verify offline: `cargo install elara-verify` → `elara-verify evidence.json` (or the
   in-browser WASM verifier — no install, no network).
-- Repo: [REPO-URL] — spin-up instructions in README (tested copy-paste commands).
+- Repo: https://github.com/navigatorbuilds/glass-box-fleet — spin-up instructions in README (tested copy-paste commands).
 
 ## What's next
 The same evidence layer applied to real enterprise connectors — and the agent-payment
