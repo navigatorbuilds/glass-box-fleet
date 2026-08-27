@@ -20,11 +20,20 @@ MOCK_VENDORS = {
     "globex-data": {"product": "Object storage", "unit_price_usd": 24.0, "sla": "99.95%"},
 }
 
+# "" for LLM-orchestrated runs. The UI's keyless demo path sets "direct" so the
+# marker lands INSIDE the sealed params — which run mode produced a record is
+# itself evidence, not display state. Not a tool argument (keeps the schema
+# the model sees clean).
+RUN_MODE = ""
+
 
 def research_vendor(vendor_name: str) -> dict:
     """Look up a vendor's offer (canned demo data). Emits a sealed evidence record."""
     offer = MOCK_VENDORS.get(vendor_name, {"error": "unknown vendor"})
-    sealed = emit_record("research-worker", "research_vendor", {"vendor": vendor_name, "offer": offer})
+    params = {"vendor": vendor_name, "offer": offer}
+    if RUN_MODE:
+        params["run_mode"] = RUN_MODE
+    sealed = emit_record("research-worker", "research_vendor", params)
     inner = sealed.get("record", {})
     return {
         "offer": offer,
