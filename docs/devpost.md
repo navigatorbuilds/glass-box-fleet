@@ -63,7 +63,7 @@ repository's own AI contributor, which operates under the entrant's receipted, r
 scope-limited mandate with a public evidence trail.
 
 ## Try it
-- Live demo: [CLOUD-RUN-URL]
+- Live demo: https://glass-box-fleet-795914174700.europe-west1.run.app
 - Verify offline: `cargo install elara-verify` → `elara-verify evidence.json` (or the
   in-browser WASM verifier — no install, no network).
 - Repo: [REPO-URL] — spin-up instructions in README (tested copy-paste commands).
