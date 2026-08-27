@@ -11,9 +11,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from google.adk.agents import Agent  # noqa: E402
+from google.genai import types  # noqa: E402
 
 from glassbox.seal import emit_record  # noqa: E402
 from glassbox import otel  # noqa: E402
+
+MODEL = "gemini-3.5-flash"
+
+# Thinking off. The demo's work is tool calls against a scripted procurement
+# flow — no reasoning budget needed — and a thinking first call measured ~25s,
+# which reads as a hung page on a Cloud Run cold start. Every agent shares this.
+GEN_CONFIG = types.GenerateContentConfig(
+    thinking_config=types.ThinkingConfig(thinking_budget=0)
+)
 
 MOCK_VENDORS = {
     "acme-cloud": {"product": "Object storage", "unit_price_usd": 21.0, "sla": "99.9%"},
@@ -47,7 +57,8 @@ def research_vendor(vendor_name: str) -> dict:
 
 research_worker = Agent(
     name="research_worker",
-    model="gemini-3.5-flash",
+    model=MODEL,
+    generate_content_config=GEN_CONFIG,
     description="Researches vendor offers for procurement; every lookup is sealed as evidence.",
     instruction=(
         "You research vendors for a procurement flow. Use the research_vendor tool for each "
@@ -120,7 +131,8 @@ def file_expense_record(intent_id: str, vendor_name: str, amount_usd: float) -> 
 
 intent_worker = Agent(
     name="intent_worker",
-    model="gemini-3.5-flash",
+    model=MODEL,
+    generate_content_config=GEN_CONFIG,
     description="Issues purchase intents under a budget mandate; every step sealed as evidence.",
     instruction=(
         "You handle purchase intents in a procurement evidence demo. For a chosen vendor: first "
@@ -134,7 +146,8 @@ intent_worker = Agent(
 
 root_agent = Agent(
     name="procurement_orchestrator",
-    model="gemini-3.5-flash",
+    model=MODEL,
+    generate_content_config=GEN_CONFIG,
     description="Orchestrates the procurement fleet; delegates research and purchasing to workers.",
     instruction=(
         "You run a procurement evidence demo. When asked to procure storage: (1) delegate "
