@@ -24,8 +24,13 @@ MOCK_VENDORS = {
 def research_vendor(vendor_name: str) -> dict:
     """Look up a vendor's offer (canned demo data). Emits a sealed evidence record."""
     offer = MOCK_VENDORS.get(vendor_name, {"error": "unknown vendor"})
-    record = emit_record("research-worker", "research_vendor", {"vendor": vendor_name, "offer": offer})
-    return {"offer": offer, "evidence_record": record.get("record_id", "STUB")}
+    sealed = emit_record("research-worker", "research_vendor", {"vendor": vendor_name, "offer": offer})
+    inner = sealed.get("record", {})
+    return {
+        "offer": offer,
+        "evidence_record": inner.get("id", "STUB"),
+        "record_hash": sealed.get("record_hash", ""),
+    }
 
 
 research_worker = Agent(
