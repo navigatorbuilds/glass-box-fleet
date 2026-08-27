@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 560" font-family="system-ui, sans-serif" font-size="14">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill:#f7f9fc; stroke:#3b5b92; stroke-width:1.6; rx:10; }
+    .gcp { fill:#eef4ff; stroke:#2a56c6; stroke-dasharray:none; }
+    .judge { fill:#f4fbf4; stroke:#2e7d32; }
+    .t { fill:#1a1a1a; }
+    .small { font-size:12px; fill:#444; }
+    .flow { stroke:#555; stroke-width:1.8; fill:none; marker-end:url(#arr); }
+    .label { font-size:12px; fill:#333; }
+  </style>
+
+  <text x="20" y="30" font-size="19" font-weight="700" class="t">Glass-Box Fleet — architecture (A1b: self-contained, offline-verifiable)</text>
+
+  <!-- Google Cloud boundary -->
+  <rect x="20" y="52" width="600" height="380" fill="none" stroke="#2a56c6" stroke-width="2" stroke-dasharray="7 5" rx="14"/>
+  <text x="36" y="76" font-weight="600" fill="#2a56c6">Google Cloud (Cloud Run service · project elara-agentic)</text>
+
+  <!-- Vertex -->
+  <rect class="box gcp" x="40" y="96" width="180" height="64" rx="10"/>
+  <text x="56" y="122" font-weight="600" class="t">Vertex AI</text>
+  <text x="56" y="142" class="small">Gemini 3.5 Flash</text>
+
+  <!-- Orchestrator -->
+  <rect class="box" x="290" y="96" width="200" height="64" rx="10"/>
+  <text x="306" y="122" font-weight="600" class="t">ADK Orchestrator</text>
+  <text x="306" y="142" class="small">procurement flow · delegates</text>
+
+  <!-- Workers -->
+  <rect class="box" x="240" y="200" width="150" height="58" rx="10"/>
+  <text x="254" y="224" font-weight="600" class="t">Worker: research</text>
+  <text x="254" y="242" class="small">3 tool actions</text>
+  <rect class="box" x="410" y="200" width="150" height="58" rx="10"/>
+  <text x="424" y="224" font-weight="600" class="t">Worker: intent</text>
+  <text x="424" y="242" class="small">3 tool actions</text>
+
+  <!-- Sealer -->
+  <rect class="box" x="290" y="300" width="240" height="66" rx="10"/>
+  <text x="306" y="324" font-weight="600" class="t">Sealer (Rust)</text>
+  <text x="306" y="344" class="small">elara-record 0.3.0 · ML-DSA-65 sign</text>
+  <text x="306" y="359" class="small">hash-links each record to the last</text>
+
+  <!-- Store -->
+  <rect class="box gcp" x="40" y="300" width="180" height="66" rx="10"/>
+  <text x="56" y="324" font-weight="600" class="t">Firestore</text>
+  <text x="56" y="344" class="small">evidence records (database)</text>
+
+  <!-- UI -->
+  <rect class="box" x="640" y="96" width="180" height="64" rx="10"/>
+  <text x="656" y="122" font-weight="600" class="t">Receipt-chain UI</text>
+  <text x="656" y="142" class="small">frontend · registry · /run</text>
+
+  <!-- Bundle -->
+  <rect class="box" x="640" y="300" width="180" height="66" rx="10"/>
+  <text x="656" y="324" font-weight="600" class="t">evidence.json</text>
+  <text x="656" y="344" class="small">downloadable mandate</text>
+  <text x="656" y="359" class="small">bundle per run</text>
+
+  <!-- Judge machine -->
+  <rect class="judge box" x="640" y="430" width="320" height="106" rx="12"/>
+  <text x="656" y="456" font-weight="700" fill="#2e7d32">Judge's own machine — OFFLINE</text>
+  <text x="656" y="478" class="small">elara-verify 0.3.3 (crates.io) — terminal</text>
+  <text x="656" y="496" class="small">or in-browser WASM verify (no network)</text>
+  <text x="656" y="520" class="small">verdict: CONSISTENT / VERIFIED — never trusts our demo</text>
+
+  <!-- flows -->
+  <path class="flow" d="M 290 128 L 224 128"/>
+  <text x="228" y="118" class="label">reasoning</text>
+  <path class="flow" d="M 370 160 L 325 200"/>
+  <path class="flow" d="M 430 160 L 475 200"/>
+  <text x="380" y="185" class="label">delegate</text>
+  <path class="flow" d="M 330 258 L 380 300"/>
+  <path class="flow" d="M 470 258 L 440 300"/>
+  <text x="480" y="285" class="label">every action</text>
+  <path class="flow" d="M 290 336 L 224 336"/>
+  <text x="230" y="326" class="label">persist</text>
+  <path class="flow" d="M 530 336 L 640 336"/>
+  <text x="545" y="326" class="label">export</text>
+  <path class="flow" d="M 620 128 L 640 128"/>
+  <path class="flow" d="M 730 366 L 762 430"/>
+  <text x="738" y="404" class="label">download</text>
+  <path class="flow" d="M 820 160 Q 900 220 890 430"/>
+  <text x="856" y="250" class="label">watch live,</text>
+  <text x="856" y="266" class="label">verify offline</text>
+
+  <text x="20" y="470" class="small">Honesty note: records are a signed, hash-linked evidence log in the published elara-record format —</text>
+  <text x="20" y="488" class="small">not a blockchain and not consensus-sealed. Offline verdicts prove integrity + signer, never "on-chain".</text>
+  <text x="20" y="514" class="small">Pre-existing (disclosed): elara-record + elara-verify (crates.io, MIT/Apache-2.0, July 2026).</text>
+  <text x="20" y="532" class="small">New this week: fleet, orchestration, sealer service, UI, integration — the entire submission layer.</text>
+</svg>
