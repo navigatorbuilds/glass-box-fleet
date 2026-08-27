@@ -49,28 +49,40 @@ def verify_page() -> FileResponse:
 _last_run: dict = {"mode": None, "detail": "", "at": None}
 _run_lock = threading.Lock()
 
-# Static registry mirror of agents/fleet.py (kept in sync by hand — the page
-# must stay serveable with no model credentials and no ADK import at request
-# time). Mandate scopes describe the demo contract, not real spending power.
+# Registry mirror of agents/fleet.py. The page must stay serveable with no model
+# credentials and no ADK import at request time, so it cannot import fleet.py —
+# but the two facts a judge could check against the chain (which model ran, what
+# cap was enforced) now come from the SAME sources fleet.py uses, not hand-copied
+# strings. Both had drifted: all three models still read gemini-3.5-flash after
+# the per-agent split, and the intent scope still quoted the deleted 500 USD
+# constant while the enforced cap is 5000 — the /agents page was contradicting
+# the refusal record in the chain.
+from glassbox.mandate import get_mandate  # noqa: E402
+from glassbox.models import MODEL_INTENT, MODEL_ORCHESTRATOR, MODEL_RESEARCH  # noqa: E402
+
 FLEET_REGISTRY = [
     {
         "name": "procurement_orchestrator",
-        "model": "gemini-3.5-flash",
+        "model": MODEL_ORCHESTRATOR,
         "mandate_scope": "delegate-only: routes work to workers, holds no tools",
         "version": "0.1.0",
         "status": "ready",
     },
     {
         "name": "research_worker",
-        "model": "gemini-3.5-flash",
+        "model": MODEL_RESEARCH,
         "mandate_scope": "read-only vendor research over canned demo data",
         "version": "0.1.0",
         "status": "ready",
     },
     {
         "name": "intent_worker",
-        "model": "gemini-3.5-flash",
-        "mandate_scope": "purchase INTENTS only, budget-capped at 500 USD/month; refusals are sealed too",
+        "model": MODEL_INTENT,
+        "mandate_scope": (
+            "purchase INTENTS only, budget-capped at "
+            f"{float(get_mandate().get('cap_usd', 0)):,.0f} USD/month "
+            f"({get_mandate().get('mandate_id', '?')}); refusals are sealed too"
+        ),
         "version": "0.1.0",
         "status": "ready",
     },

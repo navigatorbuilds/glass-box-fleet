@@ -19,15 +19,14 @@ from google.genai import types  # noqa: E402
 from glassbox.seal import emit_record  # noqa: E402
 from glassbox import otel  # noqa: E402
 
-# One model per agent, and deliberately not the same one. The free tier meters
-# `generateContent` per project PER MODEL, so three agents on three models draw
-# three separate daily buckets instead of racing for one — the demo stays
-# runnable on a project with no billing account attached at all. It also
-# matches the work: cheap lookups for research, a stronger model where the
-# mandate decision and the replan actually happen.
-MODEL_ORCHESTRATOR = os.environ.get("MODEL_ORCHESTRATOR", "gemini-3.7-flash")
-MODEL_RESEARCH = os.environ.get("MODEL_RESEARCH", "gemini-3.5-flash-lite")
-MODEL_INTENT = os.environ.get("MODEL_INTENT", "gemini-3.6-flash")
+# One model per agent, and deliberately not the same one — rationale in
+# glassbox/models.py, which is also where the UI reads them from (it may not
+# import this module: that would pull ADK into the page path).
+from glassbox.models import (  # noqa: E402
+    MODEL_INTENT,
+    MODEL_ORCHESTRATOR,
+    MODEL_RESEARCH,
+)
 
 # Thinking off where the model allows it. The demo's work is tool calls against
 # a known procurement flow — no reasoning budget needed — and a thinking first
