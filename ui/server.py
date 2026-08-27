@@ -277,11 +277,15 @@ def _have_model_credentials() -> bool:
     return adc.exists()
 
 
-# Spend guard. Moving the model path onto Vertex put it on a project that has a
-# real billing account, so "a judge cannot reach a payment method" is no longer
-# structurally true and must be enforced here instead of asserted in the README.
-# Beyond the cap the run still completes — it degrades to the keyless `direct`
-# path, so the evidence story never breaks, only the model narration stops.
+# Spend guard, defence in depth. The default deployment now runs inference on an
+# AI Studio key whose project has NO billing account attached, so overspend is
+# already structurally impossible — the free tier stops at 429 rather than
+# degrading into paid usage. This cap is what protects the case where someone
+# deploys with Vertex or a billed key instead (_using_vertex below is still a
+# supported path), because a GCP budget is an alert, not a cap: it emails you,
+# it never stops the spend. Beyond the cap the run still completes — it degrades
+# to the keyless `direct` path, so the evidence story never breaks, only the
+# model narration stops.
 MODEL_RUNS_PER_DAY = int(os.environ.get("MODEL_RUNS_PER_DAY", "200"))
 _model_budget = {"day": "", "used": 0}
 
